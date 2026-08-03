@@ -111,20 +111,19 @@ object RuleJsonUtil {
 
         val trimmed = jsonContent.trim()
         val jsonArray: JSONArray
-        
+
         if (trimmed.startsWith("{")) {
             val rootObj = JSONObject(trimmed)
-            val version = rootObj.optInt("version", 1)
+            if (!rootObj.has("version")) {
+                throw Exception("El campo 'version' es obligatorio en el archivo de reglas.")
+            }
+            val version = rootObj.getInt("version")
             if (version < MIN_SUPPORTED_VERSION) {
                 throw Exception("La versión del archivo importado ($version) es menor que la mínima soportada ($MIN_SUPPORTED_VERSION)")
             }
-            jsonArray = rootObj.optJSONArray("rules") ?: JSONArray()
+            jsonArray = rootObj.optJSONArray("rules") ?: throw Exception("El campo 'rules' es obligatorio.")
         } else {
-            // Formato legacy (JSONArray raíz, versión implícita 1)
-            if (MIN_SUPPORTED_VERSION > 1) {
-                throw Exception("El formato heredado (sin versión) ya no está soportado. Versión mínima requerida: $MIN_SUPPORTED_VERSION")
-            }
-            jsonArray = JSONArray(trimmed)
+            throw Exception("El archivo debe ser un objeto JSON con el campo 'version' obligatorio.")
         }
 
         for (i in 0 until jsonArray.length()) {

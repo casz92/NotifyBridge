@@ -5,12 +5,13 @@ NotifyBridge es una aplicación nativa de Android diseñada para interceptar y r
 ## Características Principales
 
 1. **Dashboard de Reglas (Crear, Editar, Borrar)**:
-   - Permite definir criterios por fuente (**SMS** o **Apps instaladas**).
+   - Permite definir criterios por fuente (**SMS**, **Apps instaladas** o **IMAP / Gmail**).
+   - **Filtro Regex Dirigido (regexMatchFields)**: Permite dirigir la expresión regular a campos específicos (ej. Título/Texto en Apps, Remitente/Destinatario/Contenido en SMS, y Emisor/Receptor/Asunto/Cuerpo en IMAP).
    - Selector de aplicaciones con **cargador asíncrono** en hilo secundario.
    - Pestañas organizadas: **General**, **Headers** (con sugerencias de autocompletado) y **Body** (con soporte JSON / Texto).
-   - Mapeo de variables dinámicas: `{not_title}`, `{sms_sender}` (remitente SMS), `{not_text}`, `{package_name}`, `{timestamp}` y `{global_NOMBRE}`.
+   - Mapeo de variables dinámicas: `{not_title}`, `{sms_sender}` (remitente SMS), `{not_text}`, `{package_name}`, `{timestamp}`, `{imap_subject}`, `{imap_body}` y `{global_NOMBRE}`.
 2. **Importación y Exportación de Reglas (JSON)**:
-   - Exporta e importa copias de seguridad de las reglas en archivos `.json` de forma nativa.
+   - Exporta e importa copias de seguridad de las reglas en archivos `.json` de forma nativa con **control de versión** integrado (versión 1).
 3. **Cola de Envíos Organizada (Tabs Activos e Historial)**:
    - **Activos**: Envíos pendientes (`PENDING`), en proceso (`PROCESSING`) o fallidos con reintento (`FAILED`).
    - **Historial**: Envíos completados (`SUCCESS`) o cancelados (`CANCELLED`), con opción de borrado individual y **"Limpiar Historial"**.

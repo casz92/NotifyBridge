@@ -115,6 +115,8 @@ class ImapFetchWorker(
                     template = rule.bodyTemplate,
                     subject = subject,
                     body = body,
+                    from = fromAddresses,
+                    to = toAddresses,
                     systemTime = systemTime
                 )
 
@@ -162,11 +164,15 @@ class ImapFetchWorker(
         template: String,
         subject: String,
         body: String,
+        from: String,
+        to: String,
         systemTime: String
     ): String {
         return template
             .replace("{imap_subject}", subject)
             .replace("{imap_body}", body)
+            .replace("{imap_from}", from)
+            .replace("{imap_to}", to)
             .replace("{timestamp}", systemTime)
             .replace("{system_time}", systemTime)
     }

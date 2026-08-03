@@ -906,6 +906,8 @@ fun VariablesHelpDialog(onDismiss: () -> Unit) {
                         Spacer(modifier = Modifier.height(6.dp))
                         VariableHelpItem("{not_title} / {sms_sender}", "Número de teléfono del remitente en SMS o título de la notificación Push en Apps.")
                         VariableHelpItem("{not_text} / {sms_text}", "Texto/cuerpo completo del mensaje SMS o contenido de la notificación.")
+                        VariableHelpItem("{imap_from}", "Dirección de correo electrónico del remitente (Modo IMAP).")
+                        VariableHelpItem("{imap_to}", "Dirección de correo electrónico del destinatario (Modo IMAP).")
                         VariableHelpItem("{imap_subject}", "Asunto del correo electrónico recibido en Modo IMAP.")
                         VariableHelpItem("{imap_body}", "Cuerpo completo de texto plano del correo electrónico recibido en Modo IMAP.")
                         VariableHelpItem("{package_name}", "Nombre del paquete de la app que envió la notificación (ej: com.whatsapp) o com.android.mms en SMS.")
@@ -939,6 +941,18 @@ fun VariablesHelpDialog(onDismiss: () -> Unit) {
                                 val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? android.content.ClipboardManager
                                 clipboard?.setPrimaryClip(android.content.ClipData.newPlainText("SMS Sample", "{\n  \"origen\": \"{sms_sender}\",\n  \"contenido\": \"{sms_text}\",\n  \"api_token\": \"{global_API_KEY}\"\n}"))
                                 Toast.makeText(context, "Ejemplo 2 copiado al portapapeles", Toast.LENGTH_SHORT).show()
+                            }
+                        )
+                    }
+
+                    item {
+                        SampleCodeBox(
+                            title = "Ejemplo 3: Correo Electrónico (IMAP)",
+                            code = "{\n  \"de\": \"{imap_from}\",\n  \"para\": \"{imap_to}\",\n  \"asunto\": \"{imap_subject}\",\n  \"cuerpo\": \"{imap_body}\"\n}",
+                            onCopy = {
+                                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? android.content.ClipboardManager
+                                clipboard?.setPrimaryClip(android.content.ClipData.newPlainText("IMAP Sample", "{\n  \"de\": \"{imap_from}\",\n  \"para\": \"{imap_to}\",\n  \"asunto\": \"{imap_subject}\",\n  \"cuerpo\": \"{imap_body}\"\n}"))
+                                Toast.makeText(context, "Ejemplo 3 copiado al portapapeles", Toast.LENGTH_SHORT).show()
                             }
                         )
                     }
