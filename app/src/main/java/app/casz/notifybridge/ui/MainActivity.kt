@@ -1,8 +1,10 @@
 package app.casz.notifybridge.ui
 
+import android.Manifest
 import android.app.Activity
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -10,6 +12,11 @@ import android.os.PowerManager
 import android.provider.Settings
 import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.core.content.ContextCompat
+import androidx.core.app.NotificationManagerCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import org.json.JSONArray
 import org.json.JSONObject
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -26,6 +33,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.snapshots.SnapshotStateList
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -82,47 +90,199 @@ fun NotifyBridgeTheme(content: @Composable () -> Unit) {
     )
 }
 
+private const val PREFS_NAME = "notifybridge_prefs"
+private const val KEY_GLOBAL_VARS_JSON = "global_variables_map_json"
+private const val KEY_RULES_LIST_JSON = "saved_rules_list_json"
+private const val KEY_DISPATCHES_LIST_JSON = "saved_dispatches_list_json"
+
+fun loadGlobalVars(context: Context): List<Pair<String, String>> {
+    val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+    val jsonString = prefs.getString(KEY_GLOBAL_VARS_JSON, "{}") ?: "{}"
+    val list = mutableListOf<Pair<String, String>>()
+    try {
+        val jsonObj = JSONObject(jsonString)
+        val keys = jsonObj.keys()
+        while (keys.hasNext()) {
+            val key = keys.next()
+            val value = jsonObj.optString(key, "")
+            if (key.isNotBlank()) {
+                list.add(key to value)
+            }
+        }
+    } catch (_: Exception) {}
+    return list
+}
+
+fun saveGlobalVars(context: Context, vars: List<Pair<String, String>>) {
+    val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+    val jsonObj = JSONObject()
+    vars.forEach { (key, value) ->
+        if (key.isNotBlank()) {
+            jsonObj.put(key, value)
+        }
+    }
+    prefs.edit().putString(KEY_GLOBAL_VARS_JSON, jsonObj.toString()).apply()
+}
+
+fun loadRules(context: Context): List<RuleEntity> {
+    val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+    val jsonString = prefs.getString(KEY_RULES_LIST_JSON, "[]") ?: "[]"
+    val (rules, _) = app.casz.notifybridge.util.RuleJsonUtil.importRulesFromJson(jsonString, 1L)
+    return rules
+}
+
+fun saveRules(context: Context, rules: List<RuleEntity>) {
+    val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+    val jsonString = app.casz.notifybridge.util.RuleJsonUtil.exportRulesToJson(rules, emptyList())
+    prefs.edit().putString(KEY_RULES_LIST_JSON, jsonString).apply()
+}
+
+fun loadDispatches(context: Context): List<DispatchEntity> {
+    val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+    val jsonString = prefs.getString(KEY_DISPATCHES_LIST_JSON, "[]") ?: "[]"
+    val list = mutableListOf<DispatchEntity>()
+    try {
+        val jsonArr = JSONArray(jsonString)
+        for (i in 0 until jsonArr.length()) {
+            val obj = jsonArr.getJSONObject(i)
+            val entity = DispatchEntity(
+                id = obj.optLong("id", 0L),
+                workId = if (obj.has("workId") && !obj.isNull("workId")) obj.optString("workId") else null,
+                ruleId = obj.optLong("ruleId", 0L),
+                triggeredBy = obj.optString("triggeredBy", ""),
+                targetUrl = obj.optString("targetUrl", ""),
+                httpMethod = obj.optString("httpMethod", "POST"),
+                headersJson = obj.optString("headersJson", "{}"),
+                payloadBody = obj.optString("payloadBody", ""),
+                status = try { DispatchStatus.valueOf(obj.optString("status", "PENDING")) } catch(_: Exception) { DispatchStatus.PENDING },
+                attempts = obj.optInt("attempts", 0),
+                maxRetries = obj.optInt("maxRetries", 3),
+                responseCode = if (obj.has("responseCode") && !obj.isNull("responseCode")) obj.optInt("responseCode") else null,
+                responseBody = if (obj.has("responseBody") && !obj.isNull("responseBody")) obj.optString("responseBody") else null,
+                errorMessage = if (obj.has("errorMessage") && !obj.isNull("errorMessage")) obj.optString("errorMessage") else null,
+                timestamp = obj.optLong("timestamp", System.currentTimeMillis())
+            )
+            list.add(entity)
+        }
+    } catch (_: Exception) {}
+    return list
+}
+
+fun saveDispatches(context: Context, dispatches: List<DispatchEntity>) {
+    val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+    val jsonArr = JSONArray()
+    for (item in dispatches) {
+        val obj = JSONObject().apply {
+            put("id", item.id)
+            if (item.workId != null) put("workId", item.workId)
+            put("ruleId", item.ruleId)
+            put("triggeredBy", item.triggeredBy)
+            put("targetUrl", item.targetUrl)
+            put("httpMethod", item.httpMethod)
+            put("headersJson", item.headersJson)
+            put("payloadBody", item.payloadBody)
+            put("status", item.status.name)
+            put("timestamp", item.timestamp)
+            put("attempts", item.attempts)
+            put("maxRetries", item.maxRetries)
+            if (item.responseCode != null) put("responseCode", item.responseCode)
+            if (item.responseBody != null) put("responseBody", item.responseBody)
+            if (item.errorMessage != null) put("errorMessage", item.errorMessage)
+        }
+        jsonArr.put(obj)
+    }
+    prefs.edit().putString(KEY_DISPATCHES_LIST_JSON, jsonArr.toString()).apply()
+}
+
+fun checkSmsPermissions(context: Context): Boolean {
+    return ContextCompat.checkSelfPermission(context, Manifest.permission.RECEIVE_SMS) == PackageManager.PERMISSION_GRANTED &&
+            ContextCompat.checkSelfPermission(context, Manifest.permission.READ_SMS) == PackageManager.PERMISSION_GRANTED
+}
+
+fun isNotificationListenerEnabled(context: Context): Boolean {
+    return NotificationManagerCompat.getEnabledListenerPackages(context).contains(context.packageName)
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MainScreen() {
     val context = LocalContext.current
-    var selectedTab by remember { mutableIntStateOf(0) }
+    var selectedTab by rememberSaveable { mutableIntStateOf(0) }
 
-    // Initial empty lists & persistent settings state
-    val rulesList = remember { mutableStateListOf<RuleEntity>() }
-    val dispatchesList = remember { mutableStateListOf<DispatchEntity>() }
-    val globalVarsList = remember { mutableStateListOf("API_KEY" to "12345", "URL_BASE" to "https://casz.app") }
+    // -2L: Ninguno, -1L: Crear nueva regla, >= 0L: Editar regla por ID
+    val draftOnStart = remember { loadRuleDraft(context) }
+    var activeEditingRuleId by rememberSaveable {
+        mutableLongStateOf(
+            if (draftOnStart != null) draftOnStart.optLong("ruleId", -1L) else -2L
+        )
+    }
 
-    val createRuleLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.StartActivityForResult()
-    ) { result ->
-        if (result.resultCode == Activity.RESULT_OK) {
-            val data = result.data ?: return@rememberLauncherForActivityResult
-            val isEdit = data.getBooleanExtra(CreateRuleActivity.EXTRA_IS_EDIT, false)
-            val ruleId = data.getLongExtra(CreateRuleActivity.EXTRA_RULE_ID, 0L)
+    var hasSmsPermission by remember { mutableStateOf(checkSmsPermissions(context)) }
+    var isNotifListenerEnabled by remember { mutableStateOf(isNotificationListenerEnabled(context)) }
+    var showNotifListenerDialog by remember { mutableStateOf(false) }
 
-            val rule = RuleEntity(
-                id = if (isEdit) ruleId else (rulesList.maxOfOrNull { it.id } ?: 0L) + 1L,
-                name = data.getStringExtra(CreateRuleActivity.EXTRA_RULE_NAME) ?: "regla001",
-                source = RuleSource.valueOf(data.getStringExtra(CreateRuleActivity.EXTRA_RULE_SOURCE) ?: "APP"),
-                appPackageNames = data.getStringExtra(CreateRuleActivity.EXTRA_APP_PACKAGES),
-                regexPattern = data.getStringExtra(CreateRuleActivity.EXTRA_REGEX) ?: ".*",
-                httpUrl = data.getStringExtra(CreateRuleActivity.EXTRA_HTTP_URL) ?: "",
-                httpMethod = data.getStringExtra(CreateRuleActivity.EXTRA_HTTP_METHOD) ?: "POST",
-                headersJson = data.getStringExtra(CreateRuleActivity.EXTRA_HEADERS_JSON) ?: "{}",
-                bodyTemplate = data.getStringExtra(CreateRuleActivity.EXTRA_BODY_TEMPLATE) ?: ""
-            )
+    val permissionsToRequest = remember {
+        val list = mutableListOf(
+            Manifest.permission.RECEIVE_SMS,
+            Manifest.permission.READ_SMS
+        )
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            list.add(Manifest.permission.POST_NOTIFICATIONS)
+        }
+        list.toTypedArray()
+    }
 
-            if (isEdit) {
-                val idx = rulesList.indexOfFirst { it.id == ruleId }
-                if (idx != -1) {
-                    rulesList[idx] = rule
-                } else {
-                    rulesList.add(rule)
-                }
-            } else {
-                rulesList.add(rule)
+    val permissionsLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestMultiplePermissions()
+    ) { permissions ->
+        hasSmsPermission = permissions[Manifest.permission.RECEIVE_SMS] == true &&
+                permissions[Manifest.permission.READ_SMS] == true
+        if (hasSmsPermission) {
+            Toast.makeText(context, "Permisos de SMS concedidos", Toast.LENGTH_SHORT).show()
+        } else {
+            Toast.makeText(context, "Se requieren permisos de SMS para interceptar mensajes", Toast.LENGTH_LONG).show()
+        }
+        if (!isNotificationListenerEnabled(context)) {
+            showNotifListenerDialog = true
+        }
+    }
+
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                hasSmsPermission = checkSmsPermissions(context)
+                isNotifListenerEnabled = isNotificationListenerEnabled(context)
             }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
+
+    // Cargar listas persistidas desde SharedPreferences para mantener estado al minimizar/restaurar
+    val rulesList = remember {
+        mutableStateListOf<RuleEntity>().apply {
+            addAll(loadRules(context))
+        }
+    }
+    val dispatchesList = remember {
+        mutableStateListOf<DispatchEntity>().apply {
+            addAll(loadDispatches(context))
+        }
+    }
+    val globalVarsList = remember {
+        mutableStateListOf<Pair<String, String>>().apply {
+            addAll(loadGlobalVars(context))
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        if (!hasSmsPermission) {
+            permissionsLauncher.launch(permissionsToRequest)
+        } else if (!isNotifListenerEnabled) {
+            showNotifListenerDialog = true
         }
     }
 
@@ -155,6 +315,7 @@ fun MainScreen() {
                     val (importedRules, importedVars) = app.casz.notifybridge.util.RuleJsonUtil.importRulesFromJson(content, startingId = nextId)
 
                     rulesList.addAll(importedRules)
+                    saveRules(context, rulesList)
 
                     // Merge imported global vars into globalVarsList
                     for (pair in importedVars) {
@@ -165,6 +326,7 @@ fun MainScreen() {
                             globalVarsList.add(pair)
                         }
                     }
+                    saveGlobalVars(context, globalVarsList)
 
                     Toast.makeText(context, "${importedRules.size} reglas e historias de variables importadas con éxito", Toast.LENGTH_SHORT).show()
                 }
@@ -172,6 +334,47 @@ fun MainScreen() {
                 Toast.makeText(context, "Error al importar reglas: ${e.message}", Toast.LENGTH_SHORT).show()
             }
         }
+    }
+
+    // Si se esta creando o editando una regla, renderizar la pantalla CreateRuleScreen directamente
+    if (activeEditingRuleId != -2L) {
+        val isEdit = activeEditingRuleId >= 0L
+        val targetRule = if (isEdit) rulesList.firstOrNull { it.id == activeEditingRuleId } else null
+
+        CreateRuleScreen(
+            isEdit = isEdit,
+            ruleId = targetRule?.id ?: 0L,
+            existingRulesCount = rulesList.size,
+            initialName = targetRule?.name,
+            initialSource = targetRule?.source?.name,
+            initialAppPackages = targetRule?.appPackageNames,
+            initialRegex = targetRule?.regexPattern,
+            initialUrl = targetRule?.httpUrl,
+            initialMethod = targetRule?.httpMethod,
+            initialHeadersJson = targetRule?.headersJson,
+            initialBody = targetRule?.bodyTemplate,
+            onBack = {
+                activeEditingRuleId = -2L
+                clearRuleDraft(context)
+            },
+            onSaveRule = { rule ->
+                if (isEdit) {
+                    val idx = rulesList.indexOfFirst { it.id == rule.id }
+                    if (idx != -1) {
+                        rulesList[idx] = rule
+                    } else {
+                        rulesList.add(rule)
+                    }
+                } else {
+                    val newId = (rulesList.maxOfOrNull { it.id } ?: 0L) + 1L
+                    rulesList.add(rule.copy(id = newId))
+                }
+                saveRules(context, rulesList)
+                activeEditingRuleId = -2L
+                clearRuleDraft(context)
+            }
+        )
+        return
     }
 
     Scaffold(
@@ -242,12 +445,7 @@ fun MainScreen() {
         floatingActionButton = {
             if (selectedTab == 0) {
                 FloatingActionButton(
-                    onClick = {
-                        val intent = Intent(context, CreateRuleActivity::class.java).apply {
-                            putExtra(CreateRuleActivity.EXTRA_EXISTING_RULES_COUNT, rulesList.size)
-                        }
-                        createRuleLauncher.launch(intent)
-                    },
+                    onClick = { activeEditingRuleId = -1L },
                     containerColor = PrimaryBlue,
                     contentColor = Color.White
                 ) {
@@ -265,31 +463,58 @@ fun MainScreen() {
             when (selectedTab) {
                 0 -> RulesDashboardScreen(
                     rules = rulesList,
-                    onEditRule = { rule ->
-                        val intent = Intent(context, CreateRuleActivity::class.java).apply {
-                            putExtra(CreateRuleActivity.EXTRA_IS_EDIT, true)
-                            putExtra(CreateRuleActivity.EXTRA_RULE_ID, rule.id)
-                            putExtra(CreateRuleActivity.EXTRA_RULE_NAME, rule.name)
-                            putExtra(CreateRuleActivity.EXTRA_RULE_SOURCE, rule.source.name)
-                            putExtra(CreateRuleActivity.EXTRA_APP_PACKAGES, rule.appPackageNames)
-                            putExtra(CreateRuleActivity.EXTRA_REGEX, rule.regexPattern)
-                            putExtra(CreateRuleActivity.EXTRA_HTTP_URL, rule.httpUrl)
-                            putExtra(CreateRuleActivity.EXTRA_HTTP_METHOD, rule.httpMethod)
-                            putExtra(CreateRuleActivity.EXTRA_HEADERS_JSON, rule.headersJson)
-                            putExtra(CreateRuleActivity.EXTRA_BODY_TEMPLATE, rule.bodyTemplate)
-                        }
-                        createRuleLauncher.launch(intent)
-                    },
+                    onEditRule = { rule -> activeEditingRuleId = rule.id },
                     onDeleteRule = { rule ->
                         rulesList.remove(rule)
+                        saveRules(context, rulesList)
                     },
                     onExportRules = { exportLauncher.launch("notifybridge_rules.json") },
                     onImportRules = { importLauncher.launch("application/json") }
                 )
-                1 -> DispatchQueueScreen(dispatchesList)
-                2 -> GlobalSettingsScreen(globalVars = globalVarsList)
+                1 -> DispatchQueueScreen(
+                    dispatches = dispatchesList,
+                    onSaveDispatches = { saveDispatches(context, dispatchesList) }
+                )
+                2 -> GlobalSettingsScreen(
+                    globalVars = globalVarsList,
+                    hasSmsPermission = hasSmsPermission,
+                    isNotifListenerEnabled = isNotifListenerEnabled,
+                    onRequestSmsPermission = {
+                        permissionsLauncher.launch(permissionsToRequest)
+                    }
+                )
             }
         }
+    }
+
+    if (showNotifListenerDialog && !isNotifListenerEnabled) {
+        AlertDialog(
+            onDismissRequest = { showNotifListenerDialog = false },
+            title = { Text("Permiso de Notificaciones", fontWeight = FontWeight.Bold, color = PrimaryBlue) },
+            text = { Text("NotifyBridge requiere el permiso especial de escucha de notificaciones para poder leer y procesar avisos de otras aplicaciones.\n\n¿Deseas abrir los Ajustes del Sistema para activarlo?") },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showNotifListenerDialog = false
+                        val intent = Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)
+                        try {
+                            context.startActivity(intent)
+                        } catch (e: Exception) {
+                            Toast.makeText(context, "No se pudo abrir la configuración de notificaciones", Toast.LENGTH_SHORT).show()
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = PrimaryBlue)
+                ) {
+                    Text("Abrir Ajustes", color = Color.White)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showNotifListenerDialog = false }) {
+                    Text("Más tarde", color = TextGray)
+                }
+            },
+            containerColor = CardBackground
+        )
     }
 }
 
@@ -444,8 +669,11 @@ fun RuleCard(
 
 // --- PANTALLA DE ENVIOS (CON TABS ACTIVOS E HISTORIAL) ---
 @Composable
-fun DispatchQueueScreen(dispatches: MutableList<DispatchEntity>) {
-    var queueTab by remember { mutableIntStateOf(0) } // 0: Activos, 1: Historial
+fun DispatchQueueScreen(
+    dispatches: MutableList<DispatchEntity>,
+    onSaveDispatches: () -> Unit = {}
+) {
+    var queueTab by rememberSaveable { mutableIntStateOf(0) } // 0: Activos, 1: Historial
     var selectedDispatchDetails by remember { mutableStateOf<DispatchEntity?>(null) }
 
     val activeDispatches = remember(dispatches.toList(), queueTab) {
@@ -495,6 +723,7 @@ fun DispatchQueueScreen(dispatches: MutableList<DispatchEntity>) {
                         dispatches.removeAll {
                             it.status == DispatchStatus.SUCCESS || it.status == DispatchStatus.CANCELLED
                         }
+                        onSaveDispatches()
                     }
                 ) {
                     Icon(Icons.Default.Delete, contentDescription = null, tint = Color.Red, modifier = Modifier.size(16.dp))
@@ -527,16 +756,19 @@ fun DispatchQueueScreen(dispatches: MutableList<DispatchEntity>) {
                             val index = dispatches.indexOfFirst { it.id == item.id }
                             if (index != -1) {
                                 dispatches[index] = item.copy(status = DispatchStatus.CANCELLED)
+                                onSaveDispatches()
                             }
                         },
                         onResend = {
                             val index = dispatches.indexOfFirst { it.id == item.id }
                             if (index != -1) {
                                 dispatches[index] = item.copy(status = DispatchStatus.PENDING, attempts = 0)
+                                onSaveDispatches()
                             }
                         },
                         onDeleteItem = {
                             dispatches.remove(item)
+                            onSaveDispatches()
                         },
                         onClick = {
                             selectedDispatchDetails = item
@@ -644,7 +876,12 @@ fun DispatchItemCard(
 
 // --- PANTALLA DE CONFIGURACION ---
 @Composable
-fun GlobalSettingsScreen(globalVars: SnapshotStateList<Pair<String, String>>) {
+fun GlobalSettingsScreen(
+    globalVars: SnapshotStateList<Pair<String, String>>,
+    hasSmsPermission: Boolean = false,
+    isNotifListenerEnabled: Boolean = false,
+    onRequestSmsPermission: () -> Unit = {}
+) {
     val context = LocalContext.current
     var retries by remember { mutableStateOf("3") }
     var timeout by remember { mutableStateOf("15") }
@@ -663,43 +900,112 @@ fun GlobalSettingsScreen(globalVars: SnapshotStateList<Pair<String, String>>) {
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        if (!isIgnoringBattery) {
-            item {
-                Text("Optimización de Batería", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = PrimaryBlue)
-                Spacer(modifier = Modifier.height(4.dp))
+        item {
+            Text("Permisos del Sistema", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = PrimaryBlue)
+            Spacer(modifier = Modifier.height(4.dp))
 
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = CardDefaults.cardColors(containerColor = CardBackground),
-                    shape = RoundedCornerShape(12.dp)
-                ) {
-                    Column(modifier = Modifier.padding(14.dp)) {
-                        Text("Ahorro de Batería en Segundo Plano", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = TextLight)
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text(
-                            text = "Estado: Optimizado (Puede pausar notificaciones con pantalla apagada)",
-                            fontSize = 12.sp,
-                            color = Color(0xFFFF9800)
-                        )
-                        Spacer(modifier = Modifier.height(10.dp))
-                        Button(
-                            onClick = {
-                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                                    val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
-                                        data = Uri.parse("package:${context.packageName}")
-                                    }
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = CardBackground),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Column(modifier = Modifier.padding(14.dp)) {
+                    // 1. Permisos de SMS
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Lectura de SMS", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = TextLight)
+                            Text(
+                                text = if (hasSmsPermission) "Estado: Concedido" else "Estado: Sin permiso",
+                                fontSize = 12.sp,
+                                color = if (hasSmsPermission) Color(0xFF4CAF50) else Color(0xFFFF9800)
+                            )
+                        }
+                        if (!hasSmsPermission) {
+                            Button(
+                                onClick = onRequestSmsPermission,
+                                colors = ButtonDefaults.buttonColors(containerColor = PrimaryBlue)
+                            ) {
+                                Text("Solicitar", color = Color.White, fontSize = 12.sp)
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Divider(color = Color.DarkGray)
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    // 2. Permiso de Escucha de Notificaciones
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Escucha de Notificaciones", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = TextLight)
+                            Text(
+                                text = if (isNotifListenerEnabled) "Estado: Servicio Activo" else "Estado: Inactivo",
+                                fontSize = 12.sp,
+                                color = if (isNotifListenerEnabled) Color(0xFF4CAF50) else Color(0xFFFF9800)
+                            )
+                        }
+                        if (!isNotifListenerEnabled) {
+                            Button(
+                                onClick = {
+                                    val intent = Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)
                                     try {
                                         context.startActivity(intent)
                                     } catch (e: Exception) {
-                                        val fallbackIntent = Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
-                                        context.startActivity(fallbackIntent)
+                                        Toast.makeText(context, "No se pudo abrir la configuración de notificaciones", Toast.LENGTH_SHORT).show()
                                     }
-                                }
-                            },
-                            colors = ButtonDefaults.buttonColors(containerColor = PrimaryBlue),
-                            modifier = Modifier.fillMaxWidth()
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = PrimaryBlue)
+                            ) {
+                                Text("Activar", color = Color.White, fontSize = 12.sp)
+                            }
+                        }
+                    }
+
+                    if (!isIgnoringBattery) {
+                        Spacer(modifier = Modifier.height(10.dp))
+                        Divider(color = Color.DarkGray)
+                        Spacer(modifier = Modifier.height(10.dp))
+
+                        // 3. Optimización de Batería
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Text("Configurar Exclusión de Batería", color = Color.White)
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text("Exclusión de Batería (Doze)", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = TextLight)
+                                Text(
+                                    text = "Estado: Optimizado (Puede pausar envíos)",
+                                    fontSize = 12.sp,
+                                    color = Color(0xFFFF9800)
+                                )
+                            }
+                            Button(
+                                onClick = {
+                                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                                        val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+                                            data = Uri.parse("package:${context.packageName}")
+                                        }
+                                        try {
+                                            context.startActivity(intent)
+                                        } catch (e: Exception) {
+                                            val fallbackIntent = Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
+                                            context.startActivity(fallbackIntent)
+                                        }
+                                    }
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = PrimaryBlue)
+                            ) {
+                                Text("Excluir", color = Color.White, fontSize = 12.sp)
+                            }
                         }
                     }
                 }
@@ -751,6 +1057,7 @@ fun GlobalSettingsScreen(globalVars: SnapshotStateList<Pair<String, String>>) {
                         onClick = {
                             val keyToRemove = pair.first
                             globalVars.removeAll { it.first == keyToRemove }
+                            saveGlobalVars(context, globalVars)
                             Toast.makeText(context, "Variable '{global_$keyToRemove}' eliminada", Toast.LENGTH_SHORT).show()
                         }
                     ) {
@@ -786,9 +1093,11 @@ fun GlobalSettingsScreen(globalVars: SnapshotStateList<Pair<String, String>>) {
                         val existingIndex = globalVars.indexOfFirst { it.first.equals(trimmedKey, ignoreCase = true) }
                         if (existingIndex != -1) {
                             globalVars[existingIndex] = trimmedKey to trimmedValue
+                            saveGlobalVars(context, globalVars)
                             Toast.makeText(context, "Variable '{global_$trimmedKey}' actualizada", Toast.LENGTH_SHORT).show()
                         } else {
                             globalVars.add(trimmedKey to trimmedValue)
+                            saveGlobalVars(context, globalVars)
                             Toast.makeText(context, "Variable '{global_$trimmedKey}' guardada", Toast.LENGTH_SHORT).show()
                         }
                         newKey = ""

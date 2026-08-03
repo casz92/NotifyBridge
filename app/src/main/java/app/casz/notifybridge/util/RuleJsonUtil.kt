@@ -149,7 +149,12 @@ object RuleJsonUtil {
                             val vName = vObj.optString("name", "").trim().uppercase().replace(" ", "_")
                             val vValue = vObj.optString("value", "").trim()
                             if (vName.isNotBlank()) {
-                                importedGlobalVars.add(vName to vValue)
+                                val idx = importedGlobalVars.indexOfFirst { it.first.equals(vName, ignoreCase = true) }
+                                if (idx != -1) {
+                                    importedGlobalVars[idx] = vName to vValue
+                                } else {
+                                    importedGlobalVars.add(vName to vValue)
+                                }
                             }
                         }
                     }
