@@ -1,51 +1,46 @@
 # NotifyBridge
 
-NotifyBridge es una aplicación nativa de Android diseñada para interceptar y retransmitir notificaciones Push y mensajes SMS hacia un servidor HTTP(S) externo en base a condiciones RegEx personalizables.
+NotifyBridge es una aplicación nativa de Android diseñada para interceptar y retransmitir notificaciones Push y mensajes SMS hacia un servidor HTTP(S) externo en base a condiciones y filtros RegEx personalizables.
 
 ## Características Principales
 
-1. **Dashboard de Reglas**: Permite definir criterios de origen (SMS o aplicaciones específicas), patrones RegEx y payloads HTTP de destino.
-2. **Cola de Envíos (Queue)**: Muestra el estado de las peticiones salientes (`PENDING`, `PROCESSING`, `SUCCESS`, `FAILED`, `CANCELLED`) con soporte para reintentos y cancelaciones desde la interfaz gráfica.
-3. **Configuración Global**: Ajustes globales de Timeout, límite de reintentos y mapa de variables globales (por ejemplo, tokens API).
+1. **Dashboard de Reglas (Crear, Editar, Borrar)**:
+   - Permite definir criterios por fuente (**SMS** o **Apps instaladas**).
+   - Selector de aplicaciones con **cargador asíncrono** en hilo secundario.
+   - Pestañas organizadas: **General**, **Headers** (con sugerencias de autocompletado) y **Body** (con soporte JSON / Texto).
+   - Mapeo de variables dinámicas: `{not_title}`, `{sms_sender}` (remitente SMS), `{not_text}`, `{package_name}`, `{timestamp}` y `{global_NOMBRE}`.
+2. **Importación y Exportación de Reglas (JSON)**:
+   - Exporta e importa copias de seguridad de las reglas en archivos `.json` de forma nativa.
+3. **Cola de Envíos Organizada (Tabs Activos e Historial)**:
+   - **Activos**: Envíos pendientes (`PENDING`), en proceso (`PROCESSING`) o fallidos con reintento (`FAILED`).
+   - **Historial**: Envíos completados (`SUCCESS`) o cancelados (`CANCELLED`), con opción de borrado individual y **"Limpiar Historial"**.
+4. **Optimización de Batería y Autoinicio**:
+   - Tarjeta dedicada en Ajustes para verificar el estado de la batería e invocar la exclusión de optimización de batería (`Doze mode`).
+   - Receptor `BootReceiver` para autoinicio al encender o reiniciar el dispositivo (`BOOT_COMPLETED`).
 
 ## Stack Tecnológico
 
-- **Lenguaje**: Kotlin
+- **Lenguaje**: Kotlin (1.9.24)
 - **Interfaz**: Jetpack Compose (Material 3)
-- **Segundo Plano**: `WorkManager` & `NotificationListenerService`
+- **Segundo Plano**: `WorkManager` & `NotificationListenerService` & `BootReceiver`
 - **Base de Datos**: `Room`
 - **Preferencia Global**: `DataStore` (Preferences)
 - **Cliente de Red**: `OkHttp`
 
 ---
 
-## Instrucciones de Compilación y Ejecución
+## Compilación y Ejecución Rápida
 
-### Opción 1: Compilación por Comando (Consola)
-
-Asegúrate de contar con el Java Development Kit (JDK 17) configurado en tus variables de entorno.
-
-Desde la carpeta raíz del proyecto, ejecuta en la consola de comandos de Windows (cmd):
-
+### Opción 1: Ejecución Directa en Dispositivo/Emulador (`run.bat`)
+Ejecuta en la consola de comandos de Windows:
 ```cmd
-gradlew.bat assembleDebug
+run.bat
 ```
+Este script compila la APK debug, detecta el dispositivo/emulador conectado vía `adb`, la instala e inicia automáticamente la aplicación.
 
-Si deseas ejecutar pruebas o limpiar el proyecto:
-
-*   **Limpiar compilaciones previas:**
-    ```cmd
-    gradlew.bat clean
-    ```
-*   **Compilar y generar bundle:**
-    ```cmd
-    gradlew.bat bundleDebug
-    ```
-
-### Opción 2: Compilación y Ejecución desde Android Studio
-
-1.  Abre **Android Studio**.
-2.  Selecciona **File > Open** y elige el directorio `C:\Users\suago\Documents\projects\NotifyBridge`.
-3.  Espera a que Gradle sincronice las dependencias del proyecto.
-4.  Conecta tu dispositivo físico Android mediante depuración USB o inicia un emulador.
-5.  Haz clic en el botón verde de **Run** (ícono de play `▶`) en la barra de herramientas superior de Android Studio o presiona `Shift + F10`.
+### Opción 2: Compilación de APK (`build.bat`)
+Ejecuta el script interactivo:
+```cmd
+build.bat
+```
+Permite seleccionar si deseas generar una versión **Debug** o **Release** y copia el resultado directamente a la raíz del proyecto.

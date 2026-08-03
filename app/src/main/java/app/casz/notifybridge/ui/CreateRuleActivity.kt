@@ -496,7 +496,9 @@ fun HeadersTabContent(
 ) {
     val suggestions = listOf(
         "{not_title}",
+        "{sms_sender}",
         "{not_text}",
+        "{sms_text}",
         "{package_name}",
         "{timestamp}",
         "{global_API_KEY}"
@@ -687,7 +689,7 @@ fun BodyTabContent(
 
         Spacer(modifier = Modifier.height(8.dp))
         Text(
-            text = "Variables disponibles: {not_title}, {not_text}, {package_name}, {timestamp}, {global_NOMBRE}",
+            text = "Variables disponibles: {not_title} / {sms_sender} (remitente), {not_text} / {sms_text} (contenido del mensaje), {package_name}, {timestamp}, {global_NOMBRE}",
             fontSize = 11.sp,
             color = TextGray
         )

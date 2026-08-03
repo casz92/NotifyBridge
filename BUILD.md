@@ -1,54 +1,69 @@
-# Compilación de APKs (Debug & Release)
+# Compilación y Ejecución de NotifyBridge (Debug, Release & Run)
 
-Este documento detalla los pasos para construir los archivos de instalación de Android (.apk) tanto de depuración (Debug) como de producción (Release).
+Este documento detalla los pasos para construir e instalar la aplicación NotifyBridge tanto en modo depuración (**Debug**) como en producción (**Release**), además de la opción de ejecución directa (**Run**).
 
 ---
 
-## 1. Compilación de APK Debug (Depuración)
+## 1. Ejecución Rápida en Dispositivo / Emulador (`run.bat`)
 
-El APK Debug se utiliza para realizar pruebas rápidas y desarrollo. Está firmado automáticamente con una firma temporal de desarrollo ("debug.keystore").
+Para compilar, instalar e iniciar automáticamente la aplicación en un dispositivo o emulador conectado, utiliza el script **`run.bat`**:
 
-### Opción A: Desde Línea de Comandos (Consola)
-Ejecuta el siguiente comando en la raíz del proyecto:
+### Ejecutar desde Consola (CMD):
 ```cmd
-gradle assembleDebug
+run.bat
 ```
-El archivo generado se ubicará en:
-`app/build/outputs/apk/debug/app-debug.apk`
 
-### Opción B: Desde Android Studio
-1. Abre el proyecto en Android Studio.
-2. Abre la pestaña de Gradle (en el panel derecho).
-3. Navega a `NotifyBridge > app > Tasks > build > assembleDebug` y haz doble clic.
-4. O en el menú de herramientas superior: **Build > Build Bundle(s) / APK(s) > Build APK(s)**.
+### ¿Qué realiza `run.bat`?
+1. Detecta automáticamente `adb` en el PATH o en la ruta del SDK de Android.
+2. Verifica los dispositivos o emuladores activos (`adb devices`).
+3. Compila e instala la APK mediante `app\gradlew.bat :app:installDebug`.
+4. Inicia la actividad principal `MainActivity` en la pantalla del dispositivo.
 
 ---
 
-## 2. Compilación de APK Release (Producción)
+## 2. Compilación de APKs mediante Script Interactivo (`build.bat`)
 
-El APK Release está optimizado y preparado para distribución. Para instalarlo en dispositivos reales de usuarios finales, debe estar firmado con una llave de producción privada (`keystore`).
+Para generar las APKs de instalación directamente en la raíz del proyecto, ejecuta:
 
-### Paso 1: Configurar KeyStore (Firma de Producción)
-Si no dispones de un KeyStore, puedes generar uno mediante consola con `keytool` o desde Android Studio en **Build > Generate Signed Bundle / APK...**.
-
-Luego, crea o edita el archivo `local.properties` en la raíz del proyecto para definir las credenciales (o inclúyelas directamente en tu bloque de firma de Gradle):
-```properties
-RELEASE_STORE_FILE=mi-llave-produccion.jks
-RELEASE_STORE_PASSWORD=miContrasenaAlmacen
-RELEASE_KEY_ALIAS=miAliasLlave
-RELEASE_KEY_PASSWORD=miContrasenaLlave
-```
-
-### Paso 2: Compilación
-Ejecuta el siguiente comando en la raíz del proyecto:
 ```cmd
-gradle assembleRelease
+build.bat
 ```
-El archivo firmado se ubicará en:
-`app/build/outputs/apk/release/app-release.apk`
+
+El menú interactivo te permitirá elegir:
+- **[1] Compilar APK Debug**: Genera `app-debug.apk` y lo copia a la raíz.
+- **[2] Compilar APK Release**: Genera `app-release.apk` (requiere firma).
+- **[3] Limpiar y Compilar Todo (Clean & Build)**.
 
 ---
 
-## 3. Automatización mediante Script Batch (.bat)
+## 3. Compilación por Comandos Gradle
 
-Para simplificar el flujo de trabajo en Windows, hemos incluido el script `build.bat` en la raíz del proyecto. Este archivo te permite compilar con un solo clic.
+Si prefieres usar la consola de comandos directamente con Gradle:
+
+### Compilación Debug:
+```cmd
+app\gradlew.bat :app:assembleDebug
+```
+Ubicación de salida: `app/build/outputs/apk/debug/app-debug.apk`
+
+### Instalar e Iniciar en Dispositivo:
+```cmd
+app\gradlew.bat :app:installDebug
+adb shell am start -n app.casz.notifybridge/.ui.MainActivity
+```
+
+### Compilación Release (Producción):
+```cmd
+app\gradlew.bat :app:assembleRelease
+```
+Ubicación de salida: `app/build/outputs/apk/release/app-release.apk`
+
+---
+
+## 4. Compilación desde Android Studio
+
+1. Abre **Android Studio**.
+2. Selecciona **File > Open** y abre el directorio raíz del proyecto.
+3. Espera a que la sincronización de Gradle finalice.
+4. Conecta tu teléfono por USB (con Depuración USB activa) o inicia un emulador.
+5. Presiona el botón de **Run** (ícono `▶` play) o `Shift + F10`.

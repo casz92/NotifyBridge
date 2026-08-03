@@ -8,7 +8,10 @@ import android.os.Build
 import android.os.Bundle
 import android.os.PowerManager
 import android.provider.Settings
+import android.widget.Toast
 import androidx.activity.ComponentActivity
+import org.json.JSONArray
+import org.json.JSONObject
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -84,33 +87,9 @@ fun MainScreen() {
     val context = LocalContext.current
     var selectedTab by remember { mutableIntStateOf(0) }
 
-    // Mock data para simular funcionamiento en tiempo real
-    val rulesList = remember {
-        mutableStateListOf(
-            RuleEntity(
-                id = 1,
-                name = "regla001",
-                source = RuleSource.APP,
-                appPackageNames = "com.whatsapp",
-                regexPattern = ".*urgente.*",
-                httpUrl = "https://casz.app/api/whatsapp",
-                httpMethod = "POST",
-                headersJson = "{\"Authorization\":\"Bearer token123\"}",
-                bodyTemplate = "{\"title\":\"{not_title}\", \"body\":\"{not_text}\"}"
-            ),
-            RuleEntity(
-                id = 2,
-                name = "regla002",
-                source = RuleSource.SMS,
-                appPackageNames = null,
-                regexPattern = ".*OTP.*",
-                httpUrl = "https://casz.app/api/otp",
-                httpMethod = "POST",
-                headersJson = "{\"Content-Type\":\"application/json\"}",
-                bodyTemplate = "{\"remitente\":\"{not_title}\", \"codigo\":\"{not_text}\"}"
-            )
-        )
-    }
+    // Initial empty lists
+    val rulesList = remember { mutableStateListOf<RuleEntity>() }
+    val dispatchesList = remember { mutableStateListOf<DispatchEntity>() }
 
     val createRuleLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult()
@@ -145,37 +124,80 @@ fun MainScreen() {
         }
     }
 
-    val dispatchesList = remember {
-        mutableStateListOf(
-            DispatchEntity(
-                id = 1,
-                workId = UUID.randomUUID().toString(),
-                ruleId = 1,
-                triggeredBy = "App: com.whatsapp",
-                targetUrl = "https://casz.app/api/whatsapp",
-                httpMethod = "POST",
-                headersJson = "{\"Authorization\":\"Bearer token123\"}",
-                payloadBody = "{\"title\":\"Juan\", \"body\":\"código urgente 4590\"}",
-                status = DispatchStatus.SUCCESS,
-                attempts = 1,
-                maxRetries = 3,
-                responseCode = 200,
-                responseBody = "{\"status\":\"ok\"}"
-            ),
-            DispatchEntity(
-                id = 2,
-                workId = UUID.randomUUID().toString(),
-                ruleId = 2,
-                triggeredBy = "SMS from: +15550199",
-                targetUrl = "https://casz.app/api/otp",
-                httpMethod = "POST",
-                headersJson = "{\"Content-Type\":\"application/json\"}",
-                payloadBody = "{\"remitente\":\"+15550199\", \"codigo\":\"Su OTP es 123456\"}",
-                status = DispatchStatus.PENDING,
-                attempts = 0,
-                maxRetries = 3
-            )
-        )
+    // Export Rules Launcher
+    val exportLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("application/json")
+    ) { uri ->
+        if (uri != null) {
+            try {
+                val jsonArray = JSONArray()
+                rulesList.forEach { rule ->
+                    val obj = JSONObject().apply {
+                        put("name", rule.name)
+                        put("source", rule.source.name)
+                        put("appPackageNames", rule.appPackageNames ?: JSONObject.NULL)
+                        put("regexPattern", rule.regexPattern)
+                        put("httpUrl", rule.httpUrl)
+                        put("httpMethod", rule.httpMethod)
+                        put("headersJson", rule.headersJson)
+                        put("bodyTemplate", rule.bodyTemplate)
+                    }
+                    jsonArray.put(obj)
+                }
+
+                context.contentResolver.openOutputStream(uri)?.use { stream ->
+                    stream.write(jsonArray.toString(2).toByteArray(Charsets.UTF_8))
+                }
+                Toast.makeText(context, "${rulesList.size} reglas exportadas con éxito", Toast.LENGTH_SHORT).show()
+            } catch (e: Exception) {
+                Toast.makeText(context, "Error al exportar reglas: ${e.message}", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    // Import Rules Launcher
+    val importLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri ->
+        if (uri != null) {
+            try {
+                val content = context.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
+                if (!content.isNullOrBlank()) {
+                    val jsonArray = JSONArray(content)
+                    var importedCount = 0
+                    var nextId = (rulesList.maxOfOrNull { it.id } ?: 0L) + 1L
+
+                    for (i in 0 until jsonArray.length()) {
+                        val obj = jsonArray.getJSONObject(i)
+                        val name = obj.optString("name", "regla_importada")
+                        val sourceStr = obj.optString("source", "APP")
+                        val appPkg: String? = if (obj.isNull("appPackageNames")) null else obj.optString("appPackageNames")
+                        val regex = obj.optString("regexPattern", ".*")
+                        val url = obj.optString("httpUrl", "https://")
+                        val method = obj.optString("httpMethod", "POST")
+                        val headers = obj.optString("headersJson", "{}")
+                        val body = obj.optString("bodyTemplate", "")
+
+                        val rule = RuleEntity(
+                            id = nextId++,
+                            name = name,
+                            source = RuleSource.valueOf(sourceStr),
+                            appPackageNames = appPkg,
+                            regexPattern = regex,
+                            httpUrl = url,
+                            httpMethod = method,
+                            headersJson = headers,
+                            bodyTemplate = body
+                        )
+                        rulesList.add(rule)
+                        importedCount++
+                    }
+                    Toast.makeText(context, "$importedCount reglas importadas con éxito", Toast.LENGTH_SHORT).show()
+                }
+            } catch (e: Exception) {
+                Toast.makeText(context, "Error al importar reglas: ${e.message}", Toast.LENGTH_SHORT).show()
+            }
+        }
     }
 
     Scaffold(
@@ -286,7 +308,9 @@ fun MainScreen() {
                     },
                     onDeleteRule = { rule ->
                         rulesList.remove(rule)
-                    }
+                    },
+                    onExportRules = { exportLauncher.launch("notifybridge_rules.json") },
+                    onImportRules = { importLauncher.launch("application/json") }
                 )
                 1 -> DispatchQueueScreen(dispatchesList)
                 2 -> GlobalSettingsScreen()
@@ -300,26 +324,62 @@ fun MainScreen() {
 fun RulesDashboardScreen(
     rules: List<RuleEntity>,
     onEditRule: (RuleEntity) -> Unit,
-    onDeleteRule: (RuleEntity) -> Unit
+    onDeleteRule: (RuleEntity) -> Unit,
+    onExportRules: () -> Unit,
+    onImportRules: () -> Unit
 ) {
     var ruleToDelete by remember { mutableStateOf<RuleEntity?>(null) }
 
-    if (rules.isEmpty()) {
-        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Text("No hay reglas creadas. Pulsa + para añadir una.", color = TextGray)
-        }
-    } else {
-        LazyColumn(
-            modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+    Column(modifier = Modifier.fillMaxSize()) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 8.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            items(rules, key = { it.id }) { rule ->
-                RuleCard(
-                    rule = rule,
-                    onEdit = { onEditRule(rule) },
-                    onDelete = { ruleToDelete = rule }
-                )
+            Text("Reglas (${rules.size})", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = PrimaryBlue)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(
+                    onClick = onImportRules,
+                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                    modifier = Modifier.height(32.dp)
+                ) {
+                    Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(14.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Importar", fontSize = 11.sp)
+                }
+                Button(
+                    onClick = onExportRules,
+                    enabled = rules.isNotEmpty(),
+                    colors = ButtonDefaults.buttonColors(containerColor = PrimaryBlue),
+                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                    modifier = Modifier.height(32.dp)
+                ) {
+                    Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(14.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Exportar", fontSize = 11.sp)
+                }
+            }
+        }
+
+        if (rules.isEmpty()) {
+            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Text("No hay reglas creadas. Pulsa + o 'Importar' para añadir.", color = TextGray)
+            }
+        } else {
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                items(rules, key = { it.id }) { rule ->
+                    RuleCard(
+                        rule = rule,
+                        onEdit = { onEditRule(rule) },
+                        onDelete = { ruleToDelete = rule }
+                    )
+                }
             }
         }
     }
