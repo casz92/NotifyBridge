@@ -1,8 +1,13 @@
 package app.casz.notifybridge.ui
 
 import android.app.Activity
+import android.content.Context
 import android.content.Intent
+import android.net.Uri
+import android.os.Build
 import android.os.Bundle
+import android.os.PowerManager
+import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
@@ -112,8 +117,11 @@ fun MainScreen() {
     ) { result ->
         if (result.resultCode == Activity.RESULT_OK) {
             val data = result.data ?: return@rememberLauncherForActivityResult
-            val newRule = RuleEntity(
-                id = (rulesList.maxOfOrNull { it.id } ?: 0L) + 1L,
+            val isEdit = data.getBooleanExtra(CreateRuleActivity.EXTRA_IS_EDIT, false)
+            val ruleId = data.getLongExtra(CreateRuleActivity.EXTRA_RULE_ID, 0L)
+
+            val rule = RuleEntity(
+                id = if (isEdit) ruleId else (rulesList.maxOfOrNull { it.id } ?: 0L) + 1L,
                 name = data.getStringExtra(CreateRuleActivity.EXTRA_RULE_NAME) ?: "regla001",
                 source = RuleSource.valueOf(data.getStringExtra(CreateRuleActivity.EXTRA_RULE_SOURCE) ?: "APP"),
                 appPackageNames = data.getStringExtra(CreateRuleActivity.EXTRA_APP_PACKAGES),
@@ -123,7 +131,17 @@ fun MainScreen() {
                 headersJson = data.getStringExtra(CreateRuleActivity.EXTRA_HEADERS_JSON) ?: "{}",
                 bodyTemplate = data.getStringExtra(CreateRuleActivity.EXTRA_BODY_TEMPLATE) ?: ""
             )
-            rulesList.add(newRule)
+
+            if (isEdit) {
+                val idx = rulesList.indexOfFirst { it.id == ruleId }
+                if (idx != -1) {
+                    rulesList[idx] = rule
+                } else {
+                    rulesList.add(rule)
+                }
+            } else {
+                rulesList.add(rule)
+            }
         }
     }
 
@@ -249,7 +267,27 @@ fun MainScreen() {
                 .padding(paddingValues)
         ) {
             when (selectedTab) {
-                0 -> RulesDashboardScreen(rulesList)
+                0 -> RulesDashboardScreen(
+                    rules = rulesList,
+                    onEditRule = { rule ->
+                        val intent = Intent(context, CreateRuleActivity::class.java).apply {
+                            putExtra(CreateRuleActivity.EXTRA_IS_EDIT, true)
+                            putExtra(CreateRuleActivity.EXTRA_RULE_ID, rule.id)
+                            putExtra(CreateRuleActivity.EXTRA_RULE_NAME, rule.name)
+                            putExtra(CreateRuleActivity.EXTRA_RULE_SOURCE, rule.source.name)
+                            putExtra(CreateRuleActivity.EXTRA_APP_PACKAGES, rule.appPackageNames)
+                            putExtra(CreateRuleActivity.EXTRA_REGEX, rule.regexPattern)
+                            putExtra(CreateRuleActivity.EXTRA_HTTP_URL, rule.httpUrl)
+                            putExtra(CreateRuleActivity.EXTRA_HTTP_METHOD, rule.httpMethod)
+                            putExtra(CreateRuleActivity.EXTRA_HEADERS_JSON, rule.headersJson)
+                            putExtra(CreateRuleActivity.EXTRA_BODY_TEMPLATE, rule.bodyTemplate)
+                        }
+                        createRuleLauncher.launch(intent)
+                    },
+                    onDeleteRule = { rule ->
+                        rulesList.remove(rule)
+                    }
+                )
                 1 -> DispatchQueueScreen(dispatchesList)
                 2 -> GlobalSettingsScreen()
             }
@@ -259,7 +297,13 @@ fun MainScreen() {
 
 // --- PANTALLA DE REGLAS ---
 @Composable
-fun RulesDashboardScreen(rules: List<RuleEntity>) {
+fun RulesDashboardScreen(
+    rules: List<RuleEntity>,
+    onEditRule: (RuleEntity) -> Unit,
+    onDeleteRule: (RuleEntity) -> Unit
+) {
+    var ruleToDelete by remember { mutableStateOf<RuleEntity?>(null) }
+
     if (rules.isEmpty()) {
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             Text("No hay reglas creadas. Pulsa + para añadir una.", color = TextGray)
@@ -270,15 +314,48 @@ fun RulesDashboardScreen(rules: List<RuleEntity>) {
             contentPadding = PaddingValues(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            items(rules) { rule ->
-                RuleCard(rule)
+            items(rules, key = { it.id }) { rule ->
+                RuleCard(
+                    rule = rule,
+                    onEdit = { onEditRule(rule) },
+                    onDelete = { ruleToDelete = rule }
+                )
             }
         }
+    }
+
+    ruleToDelete?.let { rule ->
+        AlertDialog(
+            onDismissRequest = { ruleToDelete = null },
+            title = { Text("Eliminar Regla", fontWeight = FontWeight.Bold, color = PrimaryBlue) },
+            text = { Text("¿Estás seguro de que deseas eliminar la regla '${rule.name}'?") },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        onDeleteRule(rule)
+                        ruleToDelete = null
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color.Red)
+                ) {
+                    Text("Eliminar", color = Color.White)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { ruleToDelete = null }) {
+                    Text("Cancelar", color = TextGray)
+                }
+            },
+            containerColor = CardBackground
+        )
     }
 }
 
 @Composable
-fun RuleCard(rule: RuleEntity) {
+fun RuleCard(
+    rule: RuleEntity,
+    onEdit: () -> Unit,
+    onDelete: () -> Unit
+) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(12.dp),
@@ -296,16 +373,26 @@ fun RuleCard(rule: RuleEntity) {
                     fontWeight = FontWeight.Bold,
                     color = PrimaryBlue
                 )
-                val badgeColor = if (rule.source == RuleSource.SMS) Color(0xFFFF9800) else Color(0xFF4CAF50)
-                Text(
-                    text = rule.source.name,
-                    fontSize = 11.sp,
-                    color = Color.White,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier
-                        .background(badgeColor, RoundedCornerShape(4.dp))
-                        .padding(horizontal = 6.dp, vertical = 2.dp)
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    val badgeColor = if (rule.source == RuleSource.SMS) Color(0xFFFF9800) else Color(0xFF4CAF50)
+                    Text(
+                        text = rule.source.name,
+                        fontSize = 11.sp,
+                        color = Color.White,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier
+                            .background(badgeColor, RoundedCornerShape(4.dp))
+                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    IconButton(onClick = onEdit, modifier = Modifier.size(24.dp)) {
+                        Icon(Icons.Default.Edit, contentDescription = "Editar", tint = TextLight)
+                    }
+                    Spacer(modifier = Modifier.width(4.dp))
+                    IconButton(onClick = onDelete, modifier = Modifier.size(24.dp)) {
+                        Icon(Icons.Default.Delete, contentDescription = "Eliminar", tint = Color.Red)
+                    }
+                }
             }
 
             Spacer(modifier = Modifier.height(8.dp))
@@ -321,40 +408,107 @@ fun RuleCard(rule: RuleEntity) {
     }
 }
 
-// --- PANTALLA DE ENVIOS ---
+// --- PANTALLA DE ENVIOS (CON TABS ACTIVOS E HISTORIAL) ---
 @Composable
 fun DispatchQueueScreen(dispatches: MutableList<DispatchEntity>) {
+    var queueTab by remember { mutableIntStateOf(0) } // 0: Activos, 1: Historial
     var selectedDispatchDetails by remember { mutableStateOf<DispatchEntity?>(null) }
 
-    if (dispatches.isEmpty()) {
-        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Text("No hay envíos registrados en la cola.", color = TextGray)
+    val activeDispatches = remember(dispatches.toList(), queueTab) {
+        dispatches.filter {
+            it.status == DispatchStatus.PENDING ||
+            it.status == DispatchStatus.PROCESSING ||
+            it.status == DispatchStatus.FAILED
         }
-    } else {
-        LazyColumn(
-            modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+    }
+
+    val historyDispatches = remember(dispatches.toList(), queueTab) {
+        dispatches.filter {
+            it.status == DispatchStatus.SUCCESS ||
+            it.status == DispatchStatus.CANCELLED
+        }
+    }
+
+    val currentList = if (queueTab == 0) activeDispatches else historyDispatches
+
+    Column(modifier = Modifier.fillMaxSize()) {
+        TabRow(
+            selectedTabIndex = queueTab,
+            containerColor = CardBackground,
+            contentColor = PrimaryBlue
         ) {
-            items(dispatches) { item ->
-                DispatchItemCard(
-                    item = item,
-                    onCancel = {
-                        val index = dispatches.indexOfFirst { it.id == item.id }
-                        if (index != -1) {
-                            dispatches[index] = item.copy(status = DispatchStatus.CANCELLED)
-                        }
-                    },
-                    onResend = {
-                        val index = dispatches.indexOfFirst { it.id == item.id }
-                        if (index != -1) {
-                            dispatches[index] = item.copy(status = DispatchStatus.PENDING, attempts = 0)
-                        }
-                    },
+            Tab(
+                selected = queueTab == 0,
+                onClick = { queueTab = 0 },
+                text = { Text("Activos (${activeDispatches.size})", fontWeight = FontWeight.Bold) }
+            )
+            Tab(
+                selected = queueTab == 1,
+                onClick = { queueTab = 1 },
+                text = { Text("Historial (${historyDispatches.size})", fontWeight = FontWeight.Bold) }
+            )
+        }
+
+        if (queueTab == 1 && historyDispatches.isNotEmpty()) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                horizontalArrangement = Arrangement.End
+            ) {
+                TextButton(
                     onClick = {
-                        selectedDispatchDetails = item
+                        dispatches.removeAll {
+                            it.status == DispatchStatus.SUCCESS || it.status == DispatchStatus.CANCELLED
+                        }
                     }
+                ) {
+                    Icon(Icons.Default.Delete, contentDescription = null, tint = Color.Red, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Limpiar Historial", color = Color.Red, fontSize = 13.sp)
+                }
+            }
+        } else {
+            Spacer(modifier = Modifier.height(8.dp))
+        }
+
+        if (currentList.isEmpty()) {
+            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Text(
+                    text = if (queueTab == 0) "No hay envíos activos en la cola." else "No hay historial de envíos.",
+                    color = TextGray
                 )
+            }
+        } else {
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                items(currentList, key = { it.id }) { item ->
+                    DispatchItemCard(
+                        item = item,
+                        isHistoryItem = queueTab == 1,
+                        onCancel = {
+                            val index = dispatches.indexOfFirst { it.id == item.id }
+                            if (index != -1) {
+                                dispatches[index] = item.copy(status = DispatchStatus.CANCELLED)
+                            }
+                        },
+                        onResend = {
+                            val index = dispatches.indexOfFirst { it.id == item.id }
+                            if (index != -1) {
+                                dispatches[index] = item.copy(status = DispatchStatus.PENDING, attempts = 0)
+                            }
+                        },
+                        onDeleteItem = {
+                            dispatches.remove(item)
+                        },
+                        onClick = {
+                            selectedDispatchDetails = item
+                        }
+                    )
+                }
             }
         }
     }
@@ -367,8 +521,10 @@ fun DispatchQueueScreen(dispatches: MutableList<DispatchEntity>) {
 @Composable
 fun DispatchItemCard(
     item: DispatchEntity,
+    isHistoryItem: Boolean,
     onCancel: () -> Unit,
     onResend: () -> Unit,
+    onDeleteItem: () -> Unit,
     onClick: () -> Unit
 ) {
     val statusColor = when (item.status) {
@@ -404,15 +560,23 @@ fun DispatchItemCard(
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f)
                 )
-                Text(
-                    text = item.status.name,
-                    fontSize = 10.sp,
-                    color = Color.Black,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier
-                        .background(statusColor, RoundedCornerShape(4.dp))
-                        .padding(horizontal = 6.dp, vertical = 2.dp)
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = item.status.name,
+                        fontSize = 10.sp,
+                        color = Color.Black,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier
+                            .background(statusColor, RoundedCornerShape(4.dp))
+                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                    )
+                    if (isHistoryItem) {
+                        Spacer(modifier = Modifier.width(6.dp))
+                        IconButton(onClick = onDeleteItem, modifier = Modifier.size(20.dp)) {
+                            Icon(Icons.Default.Delete, contentDescription = "Borrar", tint = Color.Red)
+                        }
+                    }
+                }
             }
 
             Spacer(modifier = Modifier.height(4.dp))
@@ -447,17 +611,66 @@ fun DispatchItemCard(
 // --- PANTALLA DE CONFIGURACION ---
 @Composable
 fun GlobalSettingsScreen() {
+    val context = LocalContext.current
     var retries by remember { mutableStateOf("3") }
     var timeout by remember { mutableStateOf("15") }
     var newKey by remember { mutableStateOf("") }
     var newValue by remember { mutableStateOf("") }
     val globalVars = remember { mutableStateListOf("API_KEY" to "12345", "URL_BASE" to "https://casz.app") }
 
+    val powerManager = remember { context.getSystemService(Context.POWER_SERVICE) as? PowerManager }
+    val isIgnoringBattery = remember(context) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && powerManager != null) {
+            powerManager.isIgnoringBatteryOptimizations(context.packageName)
+        } else true
+    }
+
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
+        item {
+            Text("Optimización de Batería", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = PrimaryBlue)
+            Spacer(modifier = Modifier.height(4.dp))
+
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = CardBackground),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Column(modifier = Modifier.padding(14.dp)) {
+                    Text("Ahorro de Batería en Segundo Plano", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = TextLight)
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = if (isIgnoringBattery) "Estado: Excluido (Recomendado)" else "Estado: Optimizado (Puede pausar notificaciones con pantalla apagada)",
+                        fontSize = 12.sp,
+                        color = if (isIgnoringBattery) Color(0xFF4CAF50) else Color(0xFFFF9800)
+                    )
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Button(
+                        onClick = {
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                                val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+                                    data = Uri.parse("package:${context.packageName}")
+                                }
+                                try {
+                                    context.startActivity(intent)
+                                } catch (e: Exception) {
+                                    val fallbackIntent = Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
+                                    context.startActivity(fallbackIntent)
+                                }
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = PrimaryBlue),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("Configurar Exclusión de Batería", color = Color.White)
+                    }
+                }
+            }
+        }
+
         item {
             Text("Ajustes de Solicitudes HTTP", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = PrimaryBlue)
             Spacer(modifier = Modifier.height(8.dp))
