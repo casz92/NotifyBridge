@@ -128,9 +128,27 @@ fun saveGlobalVars(context: Context, vars: List<Pair<String, String>>) {
 
 fun loadRules(context: Context): List<RuleEntity> {
     val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-    val jsonString = prefs.getString(KEY_RULES_LIST_JSON, "[]") ?: "[]"
-    val (rules, _) = app.casz.notifybridge.util.RuleJsonUtil.importRulesFromJson(jsonString, 1L)
-    return rules
+    val jsonString = prefs.getString(KEY_RULES_LIST_JSON, "{\"version\":1,\"rules\":[]}") ?: "{\"version\":1,\"rules\":[]}"
+    return try {
+        val (rules, _) = app.casz.notifybridge.util.RuleJsonUtil.importRulesFromJson(jsonString, 1L)
+        rules
+    } catch (e: Exception) {
+        android.util.Log.e("MainActivity", "Error importando reglas, intentando migrar legacy: ${e.message}")
+        try {
+            // Intentar migrar formato legacy array
+            val legacyArray = org.json.JSONArray(jsonString)
+            val migratedObj = org.json.JSONObject().apply {
+                put("version", 1)
+                put("rules", legacyArray)
+            }
+            val (rules, _) = app.casz.notifybridge.util.RuleJsonUtil.importRulesFromJson(migratedObj.toString(), 1L)
+            saveRules(context, rules)
+            rules
+        } catch (ex: Exception) {
+            android.util.Log.e("MainActivity", "Fallo total al cargar reglas: ${ex.message}")
+            emptyList()
+        }
+    }
 }
 
 fun saveRules(context: Context, rules: List<RuleEntity>) {
