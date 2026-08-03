@@ -26,6 +26,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.snapshots.SnapshotStateList
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
@@ -87,9 +88,10 @@ fun MainScreen() {
     val context = LocalContext.current
     var selectedTab by remember { mutableIntStateOf(0) }
 
-    // Initial empty lists
+    // Initial empty lists & persistent settings state
     val rulesList = remember { mutableStateListOf<RuleEntity>() }
     val dispatchesList = remember { mutableStateListOf<DispatchEntity>() }
+    val globalVarsList = remember { mutableStateListOf("API_KEY" to "12345", "URL_BASE" to "https://casz.app") }
 
     val createRuleLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult()
@@ -130,23 +132,9 @@ fun MainScreen() {
     ) { uri ->
         if (uri != null) {
             try {
-                val jsonArray = JSONArray()
-                rulesList.forEach { rule ->
-                    val obj = JSONObject().apply {
-                        put("name", rule.name)
-                        put("source", rule.source.name)
-                        put("appPackageNames", rule.appPackageNames ?: JSONObject.NULL)
-                        put("regexPattern", rule.regexPattern)
-                        put("httpUrl", rule.httpUrl)
-                        put("httpMethod", rule.httpMethod)
-                        put("headersJson", rule.headersJson)
-                        put("bodyTemplate", rule.bodyTemplate)
-                    }
-                    jsonArray.put(obj)
-                }
-
+                val jsonString = app.casz.notifybridge.util.RuleJsonUtil.exportRulesToJson(rulesList, globalVarsList)
                 context.contentResolver.openOutputStream(uri)?.use { stream ->
-                    stream.write(jsonArray.toString(2).toByteArray(Charsets.UTF_8))
+                    stream.write(jsonString.toByteArray(Charsets.UTF_8))
                 }
                 Toast.makeText(context, "${rulesList.size} reglas exportadas con éxito", Toast.LENGTH_SHORT).show()
             } catch (e: Exception) {
@@ -163,36 +151,22 @@ fun MainScreen() {
             try {
                 val content = context.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
                 if (!content.isNullOrBlank()) {
-                    val jsonArray = JSONArray(content)
-                    var importedCount = 0
-                    var nextId = (rulesList.maxOfOrNull { it.id } ?: 0L) + 1L
+                    val nextId = (rulesList.maxOfOrNull { it.id } ?: 0L) + 1L
+                    val (importedRules, importedVars) = app.casz.notifybridge.util.RuleJsonUtil.importRulesFromJson(content, startingId = nextId)
 
-                    for (i in 0 until jsonArray.length()) {
-                        val obj = jsonArray.getJSONObject(i)
-                        val name = obj.optString("name", "regla_importada")
-                        val sourceStr = obj.optString("source", "APP")
-                        val appPkg: String? = if (obj.isNull("appPackageNames")) null else obj.optString("appPackageNames")
-                        val regex = obj.optString("regexPattern", ".*")
-                        val url = obj.optString("httpUrl", "https://")
-                        val method = obj.optString("httpMethod", "POST")
-                        val headers = obj.optString("headersJson", "{}")
-                        val body = obj.optString("bodyTemplate", "")
+                    rulesList.addAll(importedRules)
 
-                        val rule = RuleEntity(
-                            id = nextId++,
-                            name = name,
-                            source = RuleSource.valueOf(sourceStr),
-                            appPackageNames = appPkg,
-                            regexPattern = regex,
-                            httpUrl = url,
-                            httpMethod = method,
-                            headersJson = headers,
-                            bodyTemplate = body
-                        )
-                        rulesList.add(rule)
-                        importedCount++
+                    // Merge imported global vars into globalVarsList
+                    for (pair in importedVars) {
+                        val idx = globalVarsList.indexOfFirst { it.first.equals(pair.first, ignoreCase = true) }
+                        if (idx != -1) {
+                            globalVarsList[idx] = pair
+                        } else {
+                            globalVarsList.add(pair)
+                        }
                     }
-                    Toast.makeText(context, "$importedCount reglas importadas con éxito", Toast.LENGTH_SHORT).show()
+
+                    Toast.makeText(context, "${importedRules.size} reglas e historias de variables importadas con éxito", Toast.LENGTH_SHORT).show()
                 }
             } catch (e: Exception) {
                 Toast.makeText(context, "Error al importar reglas: ${e.message}", Toast.LENGTH_SHORT).show()
@@ -313,7 +287,7 @@ fun MainScreen() {
                     onImportRules = { importLauncher.launch("application/json") }
                 )
                 1 -> DispatchQueueScreen(dispatchesList)
-                2 -> GlobalSettingsScreen()
+                2 -> GlobalSettingsScreen(globalVars = globalVarsList)
             }
         }
     }
@@ -670,13 +644,12 @@ fun DispatchItemCard(
 
 // --- PANTALLA DE CONFIGURACION ---
 @Composable
-fun GlobalSettingsScreen() {
+fun GlobalSettingsScreen(globalVars: SnapshotStateList<Pair<String, String>>) {
     val context = LocalContext.current
     var retries by remember { mutableStateOf("3") }
     var timeout by remember { mutableStateOf("15") }
     var newKey by remember { mutableStateOf("") }
     var newValue by remember { mutableStateOf("") }
-    val globalVars = remember { mutableStateListOf("API_KEY" to "12345", "URL_BASE" to "https://casz.app") }
 
     val powerManager = remember { context.getSystemService(Context.POWER_SERVICE) as? PowerManager }
     val isIgnoringBattery = remember(context) {
@@ -690,42 +663,44 @@ fun GlobalSettingsScreen() {
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        item {
-            Text("Optimización de Batería", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = PrimaryBlue)
-            Spacer(modifier = Modifier.height(4.dp))
+        if (!isIgnoringBattery) {
+            item {
+                Text("Optimización de Batería", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = PrimaryBlue)
+                Spacer(modifier = Modifier.height(4.dp))
 
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(containerColor = CardBackground),
-                shape = RoundedCornerShape(12.dp)
-            ) {
-                Column(modifier = Modifier.padding(14.dp)) {
-                    Text("Ahorro de Batería en Segundo Plano", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = TextLight)
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        text = if (isIgnoringBattery) "Estado: Excluido (Recomendado)" else "Estado: Optimizado (Puede pausar notificaciones con pantalla apagada)",
-                        fontSize = 12.sp,
-                        color = if (isIgnoringBattery) Color(0xFF4CAF50) else Color(0xFFFF9800)
-                    )
-                    Spacer(modifier = Modifier.height(10.dp))
-                    Button(
-                        onClick = {
-                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                                val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
-                                    data = Uri.parse("package:${context.packageName}")
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(containerColor = CardBackground),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Column(modifier = Modifier.padding(14.dp)) {
+                        Text("Ahorro de Batería en Segundo Plano", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = TextLight)
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = "Estado: Optimizado (Puede pausar notificaciones con pantalla apagada)",
+                            fontSize = 12.sp,
+                            color = Color(0xFFFF9800)
+                        )
+                        Spacer(modifier = Modifier.height(10.dp))
+                        Button(
+                            onClick = {
+                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                                    val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+                                        data = Uri.parse("package:${context.packageName}")
+                                    }
+                                    try {
+                                        context.startActivity(intent)
+                                    } catch (e: Exception) {
+                                        val fallbackIntent = Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
+                                        context.startActivity(fallbackIntent)
+                                    }
                                 }
-                                try {
-                                    context.startActivity(intent)
-                                } catch (e: Exception) {
-                                    val fallbackIntent = Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
-                                    context.startActivity(fallbackIntent)
-                                }
-                            }
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = PrimaryBlue),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Text("Configurar Exclusión de Batería", color = Color.White)
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = PrimaryBlue),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text("Configurar Exclusión de Batería", color = Color.White)
+                        }
                     }
                 }
             }
@@ -758,7 +733,7 @@ fun GlobalSettingsScreen() {
             Text("Usa {global_NOMBRE} en cualquier cuerpo de regla.", fontSize = 12.sp, color = TextGray)
         }
 
-        items(globalVars) { pair ->
+        items(globalVars, key = { it.first }) { pair ->
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 colors = CardDefaults.cardColors(containerColor = Color.DarkGray.copy(alpha = 0.3f))
@@ -769,10 +744,16 @@ fun GlobalSettingsScreen() {
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Column {
-                        Text(pair.first, fontWeight = FontWeight.Bold, color = TextLight)
-                        Text(pair.second, color = TextGray, fontSize = 13.sp)
+                        Text("{global_${pair.first}}", fontWeight = FontWeight.Bold, color = PrimaryBlue)
+                        Text("Valor: ${pair.second}", color = TextGray, fontSize = 13.sp)
                     }
-                    IconButton(onClick = { globalVars.remove(pair) }) {
+                    IconButton(
+                        onClick = {
+                            val keyToRemove = pair.first
+                            globalVars.removeAll { it.first == keyToRemove }
+                            Toast.makeText(context, "Variable '{global_$keyToRemove}' eliminada", Toast.LENGTH_SHORT).show()
+                        }
+                    ) {
                         Icon(Icons.Default.Delete, contentDescription = "Eliminar", tint = Color.Red)
                     }
                 }
@@ -784,29 +765,42 @@ fun GlobalSettingsScreen() {
                 OutlinedTextField(
                     value = newKey,
                     onValueChange = { newKey = it },
-                    label = { Text("Clave") },
-                    modifier = Modifier.weight(1f)
+                    label = { Text("Nombre") },
+                    modifier = Modifier.weight(1f),
+                    colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = PrimaryBlue)
                 )
                 OutlinedTextField(
                     value = newValue,
                     onValueChange = { newValue = it },
                     label = { Text("Valor") },
-                    modifier = Modifier.weight(1f)
+                    modifier = Modifier.weight(1f),
+                    colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = PrimaryBlue)
                 )
             }
             Spacer(modifier = Modifier.height(8.dp))
             Button(
                 onClick = {
-                    if (newKey.isNotBlank() && newValue.isNotBlank()) {
-                        globalVars.add(newKey to newValue)
+                    val trimmedKey = newKey.trim().uppercase().replace(" ", "_")
+                    val trimmedValue = newValue.trim()
+                    if (trimmedKey.isNotBlank() && trimmedValue.isNotBlank()) {
+                        val existingIndex = globalVars.indexOfFirst { it.first.equals(trimmedKey, ignoreCase = true) }
+                        if (existingIndex != -1) {
+                            globalVars[existingIndex] = trimmedKey to trimmedValue
+                            Toast.makeText(context, "Variable '{global_$trimmedKey}' actualizada", Toast.LENGTH_SHORT).show()
+                        } else {
+                            globalVars.add(trimmedKey to trimmedValue)
+                            Toast.makeText(context, "Variable '{global_$trimmedKey}' guardada", Toast.LENGTH_SHORT).show()
+                        }
                         newKey = ""
                         newValue = ""
+                    } else {
+                        Toast.makeText(context, "Ingresa Clave y Valor para la variable", Toast.LENGTH_SHORT).show()
                     }
                 },
                 modifier = Modifier.fillMaxWidth(),
                 colors = ButtonDefaults.buttonColors(containerColor = PrimaryBlue)
             ) {
-                Text("Añadir Variable Global")
+                Text("Añadir / Guardar Variable Global")
             }
         }
     }

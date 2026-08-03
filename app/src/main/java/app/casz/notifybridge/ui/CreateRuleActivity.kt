@@ -21,7 +21,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -555,7 +557,6 @@ fun HeaderInputRow(
     var valueText by remember(item.id) { mutableStateOf(item.value) }
     var showValueSuggestions by remember { mutableStateOf(false) }
 
-    // Filter suggestions based on value input (max 4 suggestions)
     val filteredSuggestions = remember(valueText) {
         if (valueText.isBlank()) {
             suggestions.take(4)
@@ -569,11 +570,11 @@ fun HeaderInputRow(
         colors = CardDefaults.cardColors(containerColor = CardBackground),
         shape = RoundedCornerShape(8.dp)
     ) {
-        Column(modifier = Modifier.padding(10.dp)) {
+        Column(modifier = Modifier.padding(8.dp)) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
                 OutlinedTextField(
                     value = keyText,
@@ -581,9 +582,9 @@ fun HeaderInputRow(
                         keyText = it
                         item.key = it
                     },
-                    label = { Text("Header Key") },
-                    placeholder = { Text("Content-Type") },
-                    modifier = Modifier.weight(1f),
+                    label = { Text("Key", fontSize = 12.sp) },
+                    placeholder = { Text("Header-Name", fontSize = 12.sp) },
+                    modifier = Modifier.weight(0.45f),
                     colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = PrimaryBlue)
                 )
 
@@ -594,14 +595,17 @@ fun HeaderInputRow(
                         item.value = it
                         showValueSuggestions = true
                     },
-                    label = { Text("Value") },
-                    placeholder = { Text("application/json") },
-                    modifier = Modifier.weight(1.2f),
+                    label = { Text("Value", fontSize = 12.sp) },
+                    placeholder = { Text("Header-Value", fontSize = 12.sp) },
+                    modifier = Modifier.weight(0.55f),
                     colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = PrimaryBlue)
                 )
 
-                IconButton(onClick = onRemove) {
-                    Icon(Icons.Default.Delete, contentDescription = "Eliminar", tint = Color.Red)
+                IconButton(
+                    onClick = onRemove,
+                    modifier = Modifier.size(28.dp)
+                ) {
+                    Icon(Icons.Default.Delete, contentDescription = "Eliminar", tint = Color.Red, modifier = Modifier.size(18.dp))
                 }
             }
 
@@ -638,6 +642,8 @@ fun BodyTabContent(
     bodyTemplate: String,
     onBodyChange: (String) -> Unit
 ) {
+    var showHelpDialog by remember { mutableStateOf(false) }
+
     Column(modifier = Modifier.fillMaxSize()) {
         Text("Formato del Payload", fontWeight = FontWeight.Bold, color = PrimaryBlue, fontSize = 16.sp)
         Spacer(modifier = Modifier.height(6.dp))
@@ -688,11 +694,150 @@ fun BodyTabContent(
         )
 
         Spacer(modifier = Modifier.height(8.dp))
-        Text(
-            text = "Variables disponibles: {not_title} / {sms_sender} (remitente), {not_text} / {sms_text} (contenido del mensaje), {package_name}, {timestamp}, {global_NOMBRE}",
-            fontSize = 11.sp,
-            color = TextGray
-        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            OutlinedButton(
+                onClick = { showHelpDialog = true },
+                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = PrimaryBlue),
+                modifier = Modifier.height(32.dp)
+            ) {
+                Icon(Icons.Default.Info, contentDescription = null, modifier = Modifier.size(14.dp))
+                Spacer(modifier = Modifier.width(6.dp))
+                Text("Guía de Variables y Ejemplos", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+            }
+        }
+    }
+
+    if (showHelpDialog) {
+        VariablesHelpDialog(onDismiss = { showHelpDialog = false })
+    }
+}
+
+// --- MODAL DE AYUDA DE VARIABLES Y PLANTILLAS ---
+@Composable
+fun VariablesHelpDialog(onDismiss: () -> Unit) {
+    val context = LocalContext.current
+    Dialog(onDismissRequest = onDismiss) {
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .fillMaxHeight(0.85f),
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(containerColor = CardBackground)
+        ) {
+            Column(
+                modifier = Modifier
+                    .padding(16.dp)
+                    .fillMaxSize()
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.Info, contentDescription = null, tint = PrimaryBlue, modifier = Modifier.size(22.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Guía de Variables", fontSize = 17.sp, fontWeight = FontWeight.Bold, color = PrimaryBlue)
+                    }
+                    IconButton(onClick = onDismiss, modifier = Modifier.size(28.dp)) {
+                        Icon(Icons.Default.Close, contentDescription = "Cerrar", tint = TextGray)
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                LazyColumn(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(14.dp)
+                ) {
+                    item {
+                        Text("Variables Disponibles", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = TextLight)
+                        Spacer(modifier = Modifier.height(6.dp))
+                        VariableHelpItem("{not_title} / {sms_sender}", "Número de teléfono del remitente en SMS (ej: +56912345678) o título de la notificación Push en Apps.")
+                        VariableHelpItem("{not_text} / {sms_text}", "Texto/cuerpo completo del mensaje SMS o contenido de la notificación.")
+                        VariableHelpItem("{package_name}", "Nombre del paquete de la app que envió la notificación (ej: com.whatsapp) o com.android.mms en SMS.")
+                        VariableHelpItem("{timestamp}", "Marca de tiempo de recepción (Epoch ms).")
+                        VariableHelpItem("{global_NOMBRE}", "Inserta el valor de cualquier Variable Global configurada en los Ajustes.")
+                    }
+
+                    item {
+                        Divider(color = Color.DarkGray)
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text("Ejemplos de Plantillas", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = PrimaryBlue)
+                    }
+
+                    item {
+                        SampleCodeBox(
+                            title = "Ejemplo 1: Notificación Push (WhatsApp / App)",
+                            code = "{\n  \"app\": \"{package_name}\",\n  \"remitente\": \"{not_title}\",\n  \"mensaje\": \"{not_text}\",\n  \"fecha\": \"{timestamp}\"\n}",
+                            onCopy = {
+                                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? android.content.ClipboardManager
+                                clipboard?.setPrimaryClip(android.content.ClipData.newPlainText("JSON Sample", "{\n  \"app\": \"{package_name}\",\n  \"remitente\": \"{not_title}\",\n  \"mensaje\": \"{not_text}\",\n  \"fecha\": \"{timestamp}\"\n}"))
+                                Toast.makeText(context, "Ejemplo 1 copiado al portapapeles", Toast.LENGTH_SHORT).show()
+                            }
+                        )
+                    }
+
+                    item {
+                        SampleCodeBox(
+                            title = "Ejemplo 2: Mensajes SMS Bancario / OTP",
+                            code = "{\n  \"origen\": \"{sms_sender}\",\n  \"contenido\": \"{sms_text}\",\n  \"api_token\": \"{global_API_KEY}\"\n}",
+                            onCopy = {
+                                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? android.content.ClipboardManager
+                                clipboard?.setPrimaryClip(android.content.ClipData.newPlainText("SMS Sample", "{\n  \"origen\": \"{sms_sender}\",\n  \"contenido\": \"{sms_text}\",\n  \"api_token\": \"{global_API_KEY}\"\n}"))
+                                Toast.makeText(context, "Ejemplo 2 copiado al portapapeles", Toast.LENGTH_SHORT).show()
+                            }
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+                Button(
+                    onClick = onDismiss,
+                    colors = ButtonDefaults.buttonColors(containerColor = PrimaryBlue),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("Cerrar", color = Color.White)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun VariableHelpItem(name: String, description: String) {
+    Column(modifier = Modifier.padding(vertical = 4.dp)) {
+        Text(name, fontWeight = FontWeight.Bold, fontSize = 13.sp, color = PrimaryBlue, fontFamily = FontFamily.Monospace)
+        Text(description, fontSize = 12.sp, color = TextLight)
+    }
+}
+
+@Composable
+fun SampleCodeBox(title: String, code: String, onCopy: () -> Unit) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = Color.Black.copy(alpha = 0.4f)),
+        shape = RoundedCornerShape(8.dp)
+    ) {
+        Column(modifier = Modifier.padding(10.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(title, fontWeight = FontWeight.SemiBold, fontSize = 12.sp, color = TextLight)
+                TextButton(onClick = onCopy, contentPadding = PaddingValues(0.dp), modifier = Modifier.height(24.dp)) {
+                    Text("Copiar", fontSize = 11.sp, color = PrimaryBlue)
+                }
+            }
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(code, fontFamily = FontFamily.Monospace, fontSize = 12.sp, color = Color(0xFF81D4FA))
+        }
     }
 }
 
