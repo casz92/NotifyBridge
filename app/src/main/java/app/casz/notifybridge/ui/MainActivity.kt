@@ -1,8 +1,12 @@
 package app.casz.notifybridge.ui
 
+import android.app.Activity
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -21,6 +25,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import app.casz.notifybridge.data.local.entity.DispatchEntity
@@ -71,15 +76,15 @@ fun NotifyBridgeTheme(content: @Composable () -> Unit) {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MainScreen() {
+    val context = LocalContext.current
     var selectedTab by remember { mutableIntStateOf(0) }
-    var showAddRuleDialog by remember { mutableStateOf(false) }
 
     // Mock data para simular funcionamiento en tiempo real
     val rulesList = remember {
         mutableStateListOf(
             RuleEntity(
                 id = 1,
-                name = "Notificaciones WhatsApp",
+                name = "regla001",
                 source = RuleSource.APP,
                 appPackageNames = "com.whatsapp",
                 regexPattern = ".*urgente.*",
@@ -90,7 +95,7 @@ fun MainScreen() {
             ),
             RuleEntity(
                 id = 2,
-                name = "SMS Interceptor OTP",
+                name = "regla002",
                 source = RuleSource.SMS,
                 appPackageNames = null,
                 regexPattern = ".*OTP.*",
@@ -100,6 +105,26 @@ fun MainScreen() {
                 bodyTemplate = "{\"remitente\":\"{not_title}\", \"codigo\":\"{not_text}\"}"
             )
         )
+    }
+
+    val createRuleLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK) {
+            val data = result.data ?: return@rememberLauncherForActivityResult
+            val newRule = RuleEntity(
+                id = (rulesList.maxOfOrNull { it.id } ?: 0L) + 1L,
+                name = data.getStringExtra(CreateRuleActivity.EXTRA_RULE_NAME) ?: "regla001",
+                source = RuleSource.valueOf(data.getStringExtra(CreateRuleActivity.EXTRA_RULE_SOURCE) ?: "APP"),
+                appPackageNames = data.getStringExtra(CreateRuleActivity.EXTRA_APP_PACKAGES),
+                regexPattern = data.getStringExtra(CreateRuleActivity.EXTRA_REGEX) ?: ".*",
+                httpUrl = data.getStringExtra(CreateRuleActivity.EXTRA_HTTP_URL) ?: "",
+                httpMethod = data.getStringExtra(CreateRuleActivity.EXTRA_HTTP_METHOD) ?: "POST",
+                headersJson = data.getStringExtra(CreateRuleActivity.EXTRA_HEADERS_JSON) ?: "{}",
+                bodyTemplate = data.getStringExtra(CreateRuleActivity.EXTRA_BODY_TEMPLATE) ?: ""
+            )
+            rulesList.add(newRule)
+        }
     }
 
     val dispatchesList = remember {
@@ -203,7 +228,12 @@ fun MainScreen() {
         floatingActionButton = {
             if (selectedTab == 0) {
                 FloatingActionButton(
-                    onClick = { showAddRuleDialog = true },
+                    onClick = {
+                        val intent = Intent(context, CreateRuleActivity::class.java).apply {
+                            putExtra(CreateRuleActivity.EXTRA_EXISTING_RULES_COUNT, rulesList.size)
+                        }
+                        createRuleLauncher.launch(intent)
+                    },
                     containerColor = PrimaryBlue,
                     contentColor = Color.White
                 ) {
@@ -224,16 +254,6 @@ fun MainScreen() {
                 2 -> GlobalSettingsScreen()
             }
         }
-    }
-
-    if (showAddRuleDialog) {
-        AddRuleDialog(
-            onDismiss = { showAddRuleDialog = false },
-            onSave = { newRule ->
-                rulesList.add(newRule)
-                showAddRuleDialog = false
-            }
-        )
     }
 }
 
@@ -519,118 +539,7 @@ fun GlobalSettingsScreen() {
     }
 }
 
-// --- DIALOGO AÑADIR REGLA ---
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun AddRuleDialog(onDismiss: () -> Unit, onSave: (RuleEntity) -> Unit) {
-    var name by remember { mutableStateOf("") }
-    var source by remember { mutableStateOf(RuleSource.APP) }
-    var appPackages by remember { mutableStateOf("com.whatsapp") }
-    var regex by remember { mutableStateOf(".*") }
-    var url by remember { mutableStateOf("https://") }
-    var method by remember { mutableStateOf("POST") }
-    var headers by remember { mutableStateOf("{\"Content-Type\":\"application/json\"}") }
-    var body by remember { mutableStateOf("{\n  \"mensaje\": \"{not_text}\"\n}") }
 
-    Dialog(onDismissRequest = onDismiss) {
-        Card(
-            modifier = Modifier
-                .fillMaxWidth()
-                .fillMaxHeight(0.85f),
-            shape = RoundedCornerShape(16.dp),
-            colors = CardDefaults.cardColors(containerColor = CardBackground)
-        ) {
-            Column(
-                modifier = Modifier
-                    .padding(16.dp)
-                    .fillMaxSize()
-            ) {
-                Text("Nueva Regla de Intercepción", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = PrimaryBlue)
-                Spacer(modifier = Modifier.height(12.dp))
-
-                LazyColumn(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    item {
-                        OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text("Nombre de la Regla") })
-                    }
-                    item {
-                        Text("Origen del Evento:", fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
-                        Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                RadioButton(selected = source == RuleSource.APP, onClick = { source = RuleSource.APP })
-                                Text("Aplicaciones")
-                            }
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                RadioButton(selected = source == RuleSource.SMS, onClick = { source = RuleSource.SMS })
-                                Text("SMS")
-                            }
-                        }
-                    }
-
-                    if (source == RuleSource.APP) {
-                        item {
-                            OutlinedTextField(
-                                value = appPackages,
-                                onValueChange = { appPackages = it },
-                                label = { Text("Paquetes de Apps (separados por coma)") }
-                            )
-                        }
-                    }
-
-                    item {
-                        OutlinedTextField(value = regex, onValueChange = { regex = it }, label = { Text("Filtro Regex") })
-                    }
-                    item {
-                        OutlinedTextField(value = url, onValueChange = { url = it }, label = { Text("URL Destino HTTP") })
-                    }
-                    item {
-                        OutlinedTextField(value = method, onValueChange = { method = it }, label = { Text("Método HTTP (POST, GET, etc.)") })
-                    }
-                    item {
-                        OutlinedTextField(value = headers, onValueChange = { headers = it }, label = { Text("Headers (JSON)") })
-                    }
-                    item {
-                        OutlinedTextField(
-                            value = body,
-                            onValueChange = { body = it },
-                            label = { Text("Cuerpo del Payload (Body)") },
-                            modifier = Modifier.height(120.dp)
-                        )
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(12.dp))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.End
-                ) {
-                    TextButton(onClick = onDismiss) { Text("Cancelar", color = TextGray) }
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Button(
-                        onClick = {
-                            if (name.isNotBlank()) {
-                                onSave(
-                                    RuleEntity(
-                                        name = name,
-                                        source = source,
-                                        appPackageNames = if (source == RuleSource.APP) appPackages else null,
-                                        regexPattern = regex,
-                                        httpUrl = url,
-                                        httpMethod = method,
-                                        headersJson = headers,
-                                        bodyTemplate = body
-                                    )
-                                )
-                            }
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = PrimaryBlue)
-                    ) {
-                        Text("Guardar")
-                    }
-                }
-            }
-        }
-    }
-}
 
 // --- DIALOGO DE DETALLE DE ENVIO ---
 @Composable

@@ -16,6 +16,8 @@
     <!-- Permiso opcional para notificaciones en primer plano en Android 14+ si es necesario -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <!-- Permiso para listar aplicaciones instaladas -->
+    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
 
     <application
         android:allowBackup="true"
@@ -34,6 +36,11 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <activity
+            android:name=".ui.CreateRuleActivity"
+            android:exported="false"
+            android:theme="@style/Theme.NotifyBridge" />
 
         <!-- Servicio de escucha de Notificaciones Push -->
         <service
