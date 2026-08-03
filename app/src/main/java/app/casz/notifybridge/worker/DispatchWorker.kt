@@ -14,6 +14,7 @@ import okhttp3.Response
 import org.json.JSONObject
 import java.io.IOException
 import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.flow.first
 
 class DispatchWorker(
     appContext: Context,
@@ -128,28 +129,22 @@ class DispatchWorker(
 
     // --- Simulación de accesos a base de datos y configuración ---
     private suspend fun getDispatchFromRoom(id: Long): DispatchEntity? {
-        // En producción, se usaría DispatchDao
-        return DispatchEntity(
-            id = id,
-            workId = null,
-            ruleId = 1,
-            triggeredBy = "Mock Trigger",
-            targetUrl = "https://midominio.com/api/notify",
-            httpMethod = "POST",
-            headersJson = "{\"Content-Type\":\"application/json\"}",
-            payloadBody = "{\"test\":\"data\"}",
-            status = DispatchStatus.PENDING,
-            attempts = 0,
-            maxRetries = 3
-        )
+        val dispatches = app.casz.notifybridge.ui.loadDispatches(applicationContext)
+        return dispatches.firstOrNull { it.id == id }
     }
 
     private suspend fun updateDispatchInRoom(entity: DispatchEntity) {
+        val dispatches = app.casz.notifybridge.ui.loadDispatches(applicationContext).toMutableList()
+        val index = dispatches.indexOfFirst { it.id == entity.id }
+        if (index != -1) {
+            dispatches[index] = entity
+            app.casz.notifybridge.ui.saveDispatches(applicationContext, dispatches)
+        }
         Log.d("DispatchWorker", "Actualizando Room a estado: ${entity.status} (Intento: ${entity.attempts})")
     }
 
-    private fun getGlobalTimeoutSeconds(): Long {
-        // Mock de lectura rápida. Debería venir de DataStore
-        return 15L
+    private suspend fun getGlobalTimeoutSeconds(): Long {
+        val appPrefs = app.casz.notifybridge.data.local.pref.AppPreferences(applicationContext)
+        return appPrefs.timeoutSeconds.first().toLong()
     }
 }

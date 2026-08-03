@@ -19,5 +19,6 @@ data class RuleEntity(
 
 enum class RuleSource {
     SMS,
-    APP
+    APP,
+    IMAP
 }

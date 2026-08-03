@@ -23,6 +23,8 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -377,6 +379,11 @@ fun MainScreen() {
         return
     }
 
+    // Intercepta el botón de atrás físico en el dashboard principal para evitar que minimice la aplicación
+    androidx.activity.compose.BackHandler(enabled = true) {
+        // No hace nada para prevenir que se minimice o cierre la app
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -633,7 +640,11 @@ fun RuleCard(
                     color = PrimaryBlue
                 )
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    val badgeColor = if (rule.source == RuleSource.SMS) Color(0xFFFF9800) else Color(0xFF4CAF50)
+                    val badgeColor = when (rule.source) {
+                        RuleSource.SMS -> Color(0xFFFF9800)
+                        RuleSource.APP -> Color(0xFF4CAF50)
+                        RuleSource.IMAP -> Color(0xFF9C27B0)
+                    }
                     Text(
                         text = rule.source.name,
                         fontSize = 11.sp,
@@ -1030,6 +1041,57 @@ fun GlobalSettingsScreen(
                 modifier = Modifier.fillMaxWidth(),
                 colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = PrimaryBlue)
             )
+        }
+
+        item {
+            Divider(color = Color.DarkGray)
+            Spacer(modifier = Modifier.height(8.dp))
+            Text("Configuración IMAP (Gmail)", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = PrimaryBlue)
+            Text("Se requiere una App Password de Google (no la contraseña regular).", fontSize = 12.sp, color = TextGray)
+            Spacer(modifier = Modifier.height(8.dp))
+
+            val coroutineScope = rememberCoroutineScope()
+            val appPrefs = remember { app.casz.notifybridge.data.local.pref.AppPreferences(context) }
+            var imapEmailVal by remember { mutableStateOf("") }
+            var imapPasswordVal by remember { mutableStateOf("") }
+
+            LaunchedEffect(Unit) {
+                imapEmailVal = appPrefs.imapEmail.first()
+                imapPasswordVal = appPrefs.imapAppPassword.first()
+            }
+
+            OutlinedTextField(
+                value = imapEmailVal,
+                onValueChange = { imapEmailVal = it },
+                label = { Text("Email") },
+                placeholder = { Text("usuario@gmail.com") },
+                modifier = Modifier.fillMaxWidth(),
+                colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = PrimaryBlue)
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            OutlinedTextField(
+                value = imapPasswordVal,
+                onValueChange = { imapPasswordVal = it },
+                label = { Text("App Password") },
+                placeholder = { Text("xxxx xxxx xxxx xxxx") },
+                visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
+                modifier = Modifier.fillMaxWidth(),
+                colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = PrimaryBlue)
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            Button(
+                onClick = {
+                    coroutineScope.launch {
+                        appPrefs.setImapEmail(imapEmailVal.trim())
+                        appPrefs.setImapAppPassword(imapPasswordVal.trim())
+                        Toast.makeText(context, "Ajustes IMAP guardados", Toast.LENGTH_SHORT).show()
+                    }
+                },
+                modifier = Modifier.fillMaxWidth(),
+                colors = ButtonDefaults.buttonColors(containerColor = PrimaryBlue)
+            ) {
+                Text("Guardar Ajustes IMAP")
+            }
         }
 
         item {

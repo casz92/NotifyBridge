@@ -35,7 +35,7 @@ class NotificationListener : NotificationListenerService() {
         val systemTime = System.currentTimeMillis().toString()
 
         serviceScope.launch {
-            // 1. Obtener reglas activas de Room para apps
+            // 1. Obtener reglas activas de Room para apps e IMAP
             val rules = getRulesFromDatabase()
 
             for (rule in rules) {
@@ -61,9 +61,27 @@ class NotificationListener : NotificationListenerService() {
                             enqueueWork(dispatchId)
                         }
                     }
+                } else if (rule.source == RuleSource.IMAP) {
+                    // Si interceptamos una notificación de Gmail (com.google.android.gm)
+                    if (packageName == "com.google.android.gm") {
+                        Log.d("NotificationListener", "Notificación de Gmail recibida en Modo IMAP. Disparando ImapFetchWorker.")
+                        enqueueImapFetchWork(rule.id)
+                    }
                 }
             }
         }
+    }
+
+    private fun enqueueImapFetchWork(ruleId: Long) {
+        val workRequest = OneTimeWorkRequest.Builder(app.casz.notifybridge.worker.ImapFetchWorker::class.java)
+            .setInputData(
+                Data.Builder()
+                    .putLong("rule_id", ruleId)
+                    .build()
+            )
+            .build()
+        WorkManager.getInstance(applicationContext).enqueue(workRequest)
+        Log.d("NotificationListener", "ImapFetchWorker encolado con ID de regla: $ruleId")
     }
 
     private fun matchesPattern(text: String, patternStr: String): Boolean {
@@ -95,26 +113,30 @@ class NotificationListener : NotificationListenerService() {
 
     // --- Simulación de acceso a base de datos y encolamiento ---
     private suspend fun getRulesFromDatabase(): List<RuleEntity> {
-        // Mock DB implementation. En la práctica se inyectaría el RuleDao
-        return listOf(
-            RuleEntity(
-                id = 1,
-                name = "Ejemplo Push Notif",
-                source = RuleSource.APP,
-                appPackageNames = "com.whatsapp,com.telegram.messenger",
-                regexPattern = ".*código.*",
-                httpUrl = "https://midominio.com/api/notify",
-                httpMethod = "POST",
-                headersJson = "{\"Content-Type\":\"application/json\"}",
-                bodyTemplate = "{\"alerta\":\"Código recibido\", \"mensaje\":\"{not_text}\", \"de\":\"{not_title}\", \"timestamp\":\"{system_time}\"}"
-            )
-        )
+        return app.casz.notifybridge.ui.loadRules(applicationContext)
     }
 
     private suspend fun savePendingDispatch(rule: RuleEntity, payload: String, sourceInfo: String): Long {
-        // Mock DB implementation para guardar el envío pendiente.
-        Log.d("NotificationListener", "Guardando envío pendiente en Room: $payload")
-        return System.currentTimeMillis() // Retorna ID simulado
+        val context = applicationContext
+        val dispatches = app.casz.notifybridge.ui.loadDispatches(context).toMutableList()
+        val newId = System.currentTimeMillis()
+        val newDispatch = DispatchEntity(
+            id = newId,
+            workId = null,
+            ruleId = rule.id,
+            triggeredBy = sourceInfo,
+            targetUrl = rule.httpUrl,
+            httpMethod = rule.httpMethod,
+            headersJson = rule.headersJson,
+            payloadBody = payload,
+            status = DispatchStatus.PENDING,
+            attempts = 0,
+            maxRetries = 3
+        )
+        dispatches.add(newDispatch)
+        app.casz.notifybridge.ui.saveDispatches(context, dispatches)
+        Log.d("NotificationListener", "Guardando envío pendiente real en Room: $payload")
+        return newId
     }
 
     private fun enqueueWork(dispatchId: Long) {

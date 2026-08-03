@@ -18,6 +18,10 @@ class AppPreferences(private val context: Context) {
         val KEY_MAX_RETRIES = intPreferencesKey("global_max_retries")
         val KEY_TIMEOUT_SECONDS = intPreferencesKey("global_timeout_seconds")
         val KEY_GLOBAL_VARIABLES = stringPreferencesKey("global_variables_json") // JSON map: API_KEY -> 12345
+
+        // --- Credenciales IMAP ---
+        val KEY_IMAP_EMAIL = stringPreferencesKey("imap_email")
+        val KEY_IMAP_APP_PASSWORD = stringPreferencesKey("imap_app_password")
     }
 
     // --- Lectura de Preferencias ---
@@ -31,6 +35,15 @@ class AppPreferences(private val context: Context) {
 
     val globalVariablesJson: Flow<String> = context.dataStore.data.map { preferences ->
         preferences[KEY_GLOBAL_VARIABLES] ?: "{}" // Diccionario vacío
+    }
+
+    // --- IMAP ---
+    val imapEmail: Flow<String> = context.dataStore.data.map { preferences ->
+        preferences[KEY_IMAP_EMAIL] ?: ""
+    }
+
+    val imapAppPassword: Flow<String> = context.dataStore.data.map { preferences ->
+        preferences[KEY_IMAP_APP_PASSWORD] ?: ""
     }
 
     // --- Escritura de Preferencias ---
@@ -51,4 +64,17 @@ class AppPreferences(private val context: Context) {
             preferences[KEY_GLOBAL_VARIABLES] = jsonString
         }
     }
+
+    suspend fun setImapEmail(email: String) {
+        context.dataStore.edit { preferences ->
+            preferences[KEY_IMAP_EMAIL] = email
+        }
+    }
+
+    suspend fun setImapAppPassword(password: String) {
+        context.dataStore.edit { preferences ->
+            preferences[KEY_IMAP_APP_PASSWORD] = password
+        }
+    }
 }
+

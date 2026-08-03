@@ -152,6 +152,10 @@ fun CreateRuleScreen(
     onBack: () -> Unit,
     onSaveRule: (RuleEntity) -> Unit
 ) {
+    androidx.activity.compose.BackHandler {
+        onBack()
+    }
+
     val context = LocalContext.current
     val draftObj = remember { loadRuleDraft(context) }
 
@@ -467,7 +471,7 @@ fun GeneralTabContent(
             Spacer(modifier = Modifier.height(4.dp))
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 FilterChip(
                     selected = ruleSource == RuleSource.APP,
@@ -482,7 +486,17 @@ fun GeneralTabContent(
                 FilterChip(
                     selected = ruleSource == RuleSource.SMS,
                     onClick = { onSourceChange(RuleSource.SMS) },
-                    label = { Text("SMS Interceptor") },
+                    label = { Text("SMS") },
+                    colors = FilterChipDefaults.filterChipColors(
+                        selectedContainerColor = PrimaryBlue,
+                        selectedLabelColor = Color.White
+                    ),
+                    modifier = Modifier.weight(1f)
+                )
+                FilterChip(
+                    selected = ruleSource == RuleSource.IMAP,
+                    onClick = { onSourceChange(RuleSource.IMAP) },
+                    label = { Text("IMAP (Gmail)") },
                     colors = FilterChipDefaults.filterChipColors(
                         selectedContainerColor = PrimaryBlue,
                         selectedLabelColor = Color.White
@@ -514,6 +528,24 @@ fun GeneralTabContent(
                                 fontWeight = FontWeight.SemiBold
                             )
                         }
+                    }
+                }
+            }
+        } else if (ruleSource == RuleSource.IMAP) {
+            item {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(containerColor = CardBackground),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Column(modifier = Modifier.padding(14.dp)) {
+                        Text("Modo IMAP Activado", fontWeight = FontWeight.Bold, color = TextLight, fontSize = 14.sp)
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = "Se interceptarán las notificaciones de Gmail (com.google.android.gm) y se descargará el correo completo automáticamente.",
+                            color = PrimaryBlue,
+                            fontSize = 13.sp
+                        )
                     }
                 }
             }
@@ -847,8 +879,10 @@ fun VariablesHelpDialog(onDismiss: () -> Unit) {
                     item {
                         Text("Variables Disponibles", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = TextLight)
                         Spacer(modifier = Modifier.height(6.dp))
-                        VariableHelpItem("{not_title} / {sms_sender}", "Número de teléfono del remitente en SMS (ej: +56912345678) o título de la notificación Push en Apps.")
+                        VariableHelpItem("{not_title} / {sms_sender}", "Número de teléfono del remitente en SMS o título de la notificación Push en Apps.")
                         VariableHelpItem("{not_text} / {sms_text}", "Texto/cuerpo completo del mensaje SMS o contenido de la notificación.")
+                        VariableHelpItem("{imap_subject}", "Asunto del correo electrónico recibido en Modo IMAP.")
+                        VariableHelpItem("{imap_body}", "Cuerpo completo de texto plano del correo electrónico recibido en Modo IMAP.")
                         VariableHelpItem("{package_name}", "Nombre del paquete de la app que envió la notificación (ej: com.whatsapp) o com.android.mms en SMS.")
                         VariableHelpItem("{timestamp}", "Marca de tiempo de recepción (Epoch ms).")
                         VariableHelpItem("{global_NOMBRE}", "Inserta el valor de cualquier Variable Global configurada en los Ajustes.")
