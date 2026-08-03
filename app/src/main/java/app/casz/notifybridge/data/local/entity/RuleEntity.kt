@@ -11,6 +11,7 @@ data class RuleEntity(
     val source: RuleSource,         // SMS or APP
     val appPackageNames: String?,   // Comma-separated list if APP, or null
     val regexPattern: String,       // RegEx filter
+    val regexMatchFields: String = "", // Comma-separated target fields to match (e.g. "title,text")
     val httpUrl: String,            // Destination URL
     val httpMethod: String,         // GET, POST, PUT etc.
     val headersJson: String,        // JSON serialized Map<String, String> of HTTP Headers

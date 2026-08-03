@@ -351,6 +351,7 @@ fun MainScreen() {
             initialSource = targetRule?.source?.name,
             initialAppPackages = targetRule?.appPackageNames,
             initialRegex = targetRule?.regexPattern,
+            initialRegexFields = targetRule?.regexMatchFields,
             initialUrl = targetRule?.httpUrl,
             initialMethod = targetRule?.httpMethod,
             initialHeadersJson = targetRule?.headersJson,

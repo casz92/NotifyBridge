@@ -30,11 +30,32 @@ class SmsReceiver : BroadcastReceiver() {
                 val body = message.displayMessageBody ?: ""
                 val timestamp = message.timestampMillis.toString()
 
+                var recipient = ""
+                try {
+                    val subId = intent.getIntExtra("subscription", -1)
+                    if (subId != -1) {
+                        val subscriptionManager = context.getSystemService(Context.TELEPHONY_SUBSCRIPTION_SERVICE) as? android.telephony.SubscriptionManager
+                        val info = subscriptionManager?.getActiveSubscriptionInfo(subId)
+                        recipient = info?.number ?: ""
+                    }
+                } catch (e: Exception) {
+                    Log.e("SmsReceiver", "Error getting subscription number: ${e.message}")
+                }
+
                 receiverScope.launch {
                     val rules = getSmsRulesFromDatabase()
                     for (rule in rules) {
                         if (rule.source == RuleSource.SMS) {
-                            if (matchesPattern(body, rule.regexPattern)) {
+                            val fields = rule.regexMatchFields.split(",").map { it.trim() }.filter { it.isNotEmpty() }
+                            val matchSender = fields.contains("sender")
+                            val matchRecipient = fields.contains("recipient")
+                            val matchBody = fields.contains("body") || fields.isEmpty() || fields.contains("all")
+
+                            val isMatch = (matchSender && matchesPattern(sender, rule.regexPattern)) ||
+                                          (matchRecipient && recipient.isNotBlank() && matchesPattern(recipient, rule.regexPattern)) ||
+                                          (matchBody && matchesPattern(body, rule.regexPattern))
+
+                            if (isMatch) {
                                 val finalPayload = resolveVariables(
                                     template = rule.bodyTemplate,
                                     sender = sender,

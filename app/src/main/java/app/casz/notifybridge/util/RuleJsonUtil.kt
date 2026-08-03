@@ -18,10 +18,21 @@ object RuleJsonUtil {
      * Escanea las variables globales usadas en cabeceras y cuerpo, inyectándolas en el nodo "_vars".
      * Convierte las cabeceras HTTP en un array de objetos con formato [{"header": "Key", "value": "Val"}].
      */
+    private const val MIN_SUPPORTED_VERSION = 1
+    private const val CURRENT_VERSION = 1
+
+    /**
+     * Serializa una lista de reglas a JSON formateado con control de versión.
+     * Escanea las variables globales usadas en cabeceras y cuerpo, inyectándolas en el nodo "_vars".
+     * Convierte las cabeceras HTTP en un array de objetos con formato [{"header": "Key", "value": "Val"}].
+     */
     fun exportRulesToJson(
         rules: List<RuleEntity>,
         globalVars: List<Pair<String, String>>
     ): String {
+        val rootObj = JSONObject()
+        rootObj.put("version", CURRENT_VERSION)
+
         val jsonArray = JSONArray()
 
         for (rule in rules) {
@@ -30,6 +41,7 @@ object RuleJsonUtil {
             ruleObj.put("source", rule.source.name)
             ruleObj.put("appPackageNames", rule.appPackageNames ?: JSONObject.NULL)
             ruleObj.put("regexPattern", rule.regexPattern)
+            ruleObj.put("regexMatchFields", rule.regexMatchFields)
             ruleObj.put("httpUrl", rule.httpUrl)
             ruleObj.put("httpMethod", rule.httpMethod)
 
@@ -75,13 +87,15 @@ object RuleJsonUtil {
             jsonArray.put(ruleObj)
         }
 
-        return jsonArray.toString(2)
+        rootObj.put("rules", jsonArray)
+        return rootObj.toString(2)
     }
 
     /**
      * Deserializa un string JSON a un par que contiene:
      * 1. Lista de objetos RuleEntity importados.
      * 2. Lista de Variables Globales extraídas del nodo "_vars".
+     * Soporta tanto el formato legacy (JSONArray raíz, versión implícita 1) como el nuevo formato (JSONObject raíz con "version").
      */
     fun importRulesFromJson(
         jsonContent: String,
@@ -95,7 +109,23 @@ object RuleJsonUtil {
             return Pair(importedRules, importedGlobalVars)
         }
 
-        val jsonArray = JSONArray(jsonContent)
+        val trimmed = jsonContent.trim()
+        val jsonArray: JSONArray
+        
+        if (trimmed.startsWith("{")) {
+            val rootObj = JSONObject(trimmed)
+            val version = rootObj.optInt("version", 1)
+            if (version < MIN_SUPPORTED_VERSION) {
+                throw Exception("La versión del archivo importado ($version) es menor que la mínima soportada ($MIN_SUPPORTED_VERSION)")
+            }
+            jsonArray = rootObj.optJSONArray("rules") ?: JSONArray()
+        } else {
+            // Formato legacy (JSONArray raíz, versión implícita 1)
+            if (MIN_SUPPORTED_VERSION > 1) {
+                throw Exception("El formato heredado (sin versión) ya no está soportado. Versión mínima requerida: $MIN_SUPPORTED_VERSION")
+            }
+            jsonArray = JSONArray(trimmed)
+        }
 
         for (i in 0 until jsonArray.length()) {
             val obj = jsonArray.getJSONObject(i)
@@ -105,6 +135,7 @@ object RuleJsonUtil {
             val source = try { RuleSource.valueOf(sourceStr) } catch (_: Exception) { RuleSource.APP }
             val appPkg: String? = if (obj.isNull("appPackageNames")) null else obj.optString("appPackageNames")
             val regex = obj.optString("regexPattern", ".*")
+            val regexFields = obj.optString("regexMatchFields", "")
             val url = obj.optString("httpUrl", "https://")
             val method = obj.optString("httpMethod", "POST")
 
@@ -167,6 +198,7 @@ object RuleJsonUtil {
                 source = source,
                 appPackageNames = appPkg,
                 regexPattern = regex,
+                regexMatchFields = regexFields,
                 httpUrl = url,
                 httpMethod = method,
                 headersJson = headersJson,

@@ -90,12 +90,25 @@ class ImapFetchWorker(
                 return Result.success()
             }
 
-            // 2. Extraer asunto y cuerpo del mensaje
+            // 2. Extraer asunto, cuerpo y direcciones del mensaje
             val subject = message.subject ?: ""
             val body = getTextFromMessage(message)
+            val fromAddresses = message.from?.joinToString(",") { it.toString() } ?: ""
+            val toAddresses = message.getRecipients(Message.RecipientType.TO)?.joinToString(",") { it.toString() } ?: ""
 
-            // 3. Evaluar Regex de la regla contra el cuerpo
-            if (matchesPattern(body, rule.regexPattern)) {
+            // 3. Evaluar Regex de la regla según los campos especificados
+            val fields = rule.regexMatchFields.split(",").map { it.trim() }.filter { it.isNotEmpty() }
+            val matchFrom = fields.contains("from")
+            val matchTo = fields.contains("to")
+            val matchSubject = fields.contains("subject")
+            val matchBody = fields.contains("body") || fields.isEmpty() || fields.contains("all")
+
+            val isMatch = (matchFrom && matchesPattern(fromAddresses, rule.regexPattern)) ||
+                          (matchTo && matchesPattern(toAddresses, rule.regexPattern)) ||
+                          (matchSubject && matchesPattern(subject, rule.regexPattern)) ||
+                          (matchBody && matchesPattern(body, rule.regexPattern))
+
+            if (isMatch) {
                 // Resolver variables
                 val systemTime = System.currentTimeMillis().toString()
                 val finalPayload = resolveVariables(

@@ -14,6 +14,7 @@ import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -40,7 +41,6 @@ import androidx.compose.ui.window.Dialog
 import app.casz.notifybridge.data.local.entity.RuleEntity
 import app.casz.notifybridge.data.local.entity.RuleSource
 import org.json.JSONObject
-
 class CreateRuleActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -53,6 +53,7 @@ class CreateRuleActivity : ComponentActivity() {
         val initialSource = intent.getStringExtra(EXTRA_RULE_SOURCE)
         val initialAppPackages = intent.getStringExtra(EXTRA_APP_PACKAGES)
         val initialRegex = intent.getStringExtra(EXTRA_REGEX)
+        val initialRegexFields = intent.getStringExtra(EXTRA_REGEX_FIELDS)
         val initialUrl = intent.getStringExtra(EXTRA_HTTP_URL)
         val initialMethod = intent.getStringExtra(EXTRA_HTTP_METHOD)
         val initialHeadersJson = intent.getStringExtra(EXTRA_HEADERS_JSON)
@@ -68,6 +69,7 @@ class CreateRuleActivity : ComponentActivity() {
                     initialSource = initialSource,
                     initialAppPackages = initialAppPackages,
                     initialRegex = initialRegex,
+                    initialRegexFields = initialRegexFields,
                     initialUrl = initialUrl,
                     initialMethod = initialMethod,
                     initialHeadersJson = initialHeadersJson,
@@ -85,6 +87,7 @@ class CreateRuleActivity : ComponentActivity() {
                             putExtra(EXTRA_RULE_SOURCE, rule.source.name)
                             putExtra(EXTRA_APP_PACKAGES, rule.appPackageNames)
                             putExtra(EXTRA_REGEX, rule.regexPattern)
+                            putExtra(EXTRA_REGEX_FIELDS, rule.regexMatchFields)
                             putExtra(EXTRA_HTTP_URL, rule.httpUrl)
                             putExtra(EXTRA_HTTP_METHOD, rule.httpMethod)
                             putExtra(EXTRA_HEADERS_JSON, rule.headersJson)
@@ -106,6 +109,7 @@ class CreateRuleActivity : ComponentActivity() {
         const val EXTRA_RULE_SOURCE = "extra_rule_source"
         const val EXTRA_APP_PACKAGES = "extra_app_packages"
         const val EXTRA_REGEX = "extra_regex"
+        const val EXTRA_REGEX_FIELDS = "extra_regex_fields"
         const val EXTRA_HTTP_URL = "extra_http_url"
         const val EXTRA_HTTP_METHOD = "extra_http_method"
         const val EXTRA_HEADERS_JSON = "extra_headers_json"
@@ -134,7 +138,6 @@ fun loadRuleDraft(context: Context): JSONObject? {
 
 data class HeaderInput(val id: Long, var key: String, var value: String)
 data class AppItemInfo(val label: String, val packageName: String)
-
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CreateRuleScreen(
@@ -145,6 +148,7 @@ fun CreateRuleScreen(
     initialSource: String?,
     initialAppPackages: String?,
     initialRegex: String?,
+    initialRegexFields: String?,
     initialUrl: String?,
     initialMethod: String?,
     initialHeadersJson: String?,
@@ -193,6 +197,13 @@ fun CreateRuleScreen(
             else (initialRegex ?: ".*")
         )
     }
+    var regexMatchFields by rememberSaveable {
+        mutableStateOf(
+            if (draftObj != null && draftObj.has("regexMatchFields")) draftObj.getString("regexMatchFields")
+            else (initialRegexFields ?: "")
+        )
+    }
+
     var httpUrl by rememberSaveable {
         mutableStateOf(
             if (draftObj != null && draftObj.has("httpUrl")) draftObj.getString("httpUrl")
@@ -252,7 +263,7 @@ fun CreateRuleScreen(
     }
 
     // Guardado automatico en tiempo real del borrador
-    LaunchedEffect(selectedTab, ruleName, ruleSource, selectedPackages, regexPattern, httpUrl, httpMethod, bodyFormat, bodyTemplate, headerInputs.toList()) {
+    LaunchedEffect(selectedTab, ruleName, ruleSource, selectedPackages, regexPattern, regexMatchFields, httpUrl, httpMethod, bodyFormat, bodyTemplate, headerInputs.toList()) {
         val headersMap = mutableMapOf<String, String>()
         headerInputs.forEach { h ->
             if (h.key.isNotBlank()) {
@@ -268,6 +279,7 @@ fun CreateRuleScreen(
             put("ruleSource", ruleSource.name)
             put("selectedPackages", selectedPackages.joinToString(","))
             put("regexPattern", regexPattern)
+            put("regexMatchFields", regexMatchFields)
             put("httpUrl", httpUrl)
             put("httpMethod", httpMethod)
             put("headersJson", JSONObject(headersMap as Map<*, *>).toString())
@@ -327,6 +339,7 @@ fun CreateRuleScreen(
                                 source = ruleSource,
                                 appPackageNames = if (ruleSource == RuleSource.APP) selectedPackages.joinToString(",") else null,
                                 regexPattern = regexPattern.ifBlank { ".*" },
+                                regexMatchFields = regexMatchFields,
                                 httpUrl = httpUrl.trim(),
                                 httpMethod = httpMethod,
                                 headersJson = headersJson,
@@ -391,6 +404,8 @@ fun CreateRuleScreen(
                         onOpenAppPicker = { showAppPicker = true },
                         regexPattern = regexPattern,
                         onRegexChange = { regexPattern = it },
+                        regexMatchFields = regexMatchFields,
+                        onRegexMatchFieldsChange = { regexMatchFields = it },
                         httpUrl = httpUrl,
                         onUrlChange = { httpUrl = it },
                         httpMethod = httpMethod,
@@ -443,6 +458,8 @@ fun GeneralTabContent(
     onOpenAppPicker: () -> Unit,
     regexPattern: String,
     onRegexChange: (String) -> Unit,
+    regexMatchFields: String,
+    onRegexMatchFieldsChange: (String) -> Unit,
     httpUrl: String,
     onUrlChange: (String) -> Unit,
     httpMethod: String,
@@ -559,6 +576,14 @@ fun GeneralTabContent(
                 supportingText = { Text("Ejemplo: .*urgente.* o .*OTP.*") },
                 modifier = Modifier.fillMaxWidth(),
                 colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = PrimaryBlue)
+            )
+        }
+
+        item {
+            RegexMatchFieldsSelector(
+                source = ruleSource,
+                selectedFieldsString = regexMatchFields,
+                onFieldsChange = onRegexMatchFieldsChange
             )
         }
 
@@ -1111,6 +1136,76 @@ fun AppPickerDialog(
                         Text("Aceptar (${tempSelected.size})")
                     }
                 }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class, ExperimentalMaterial3Api::class)
+@Composable
+fun RegexMatchFieldsSelector(
+    source: RuleSource,
+    selectedFieldsString: String,
+    onFieldsChange: (String) -> Unit
+) {
+    val selectedFields = remember(selectedFieldsString) {
+        selectedFieldsString.split(",").map { it.trim() }.filter { it.isNotEmpty() }.toSet()
+    }
+
+    val options = when (source) {
+        RuleSource.APP -> listOf(
+            "title" to "Título",
+            "text" to "Texto"
+        )
+        RuleSource.SMS -> listOf(
+            "sender" to "Remitente",
+            "recipient" to "Destinatario",
+            "body" to "Contenido"
+        )
+        RuleSource.IMAP -> listOf(
+            "from" to "De (From)",
+            "to" to "Para (To)",
+            "subject" to "Asunto",
+            "body" to "Cuerpo"
+        )
+    }
+
+    fun toggleField(field: String) {
+        val newFields = if (selectedFields.contains(field)) {
+            selectedFields - field
+        } else {
+            selectedFields + field
+        }
+        onFieldsChange(newFields.joinToString(","))
+    }
+
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Text(
+            text = "Aplicar filtro Regex en:",
+            fontWeight = FontWeight.Bold,
+            color = PrimaryBlue,
+            fontSize = 14.sp
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+        
+        androidx.compose.foundation.layout.FlowRow(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            options.forEach { (field, label) ->
+                val isSelected = selectedFields.contains(field) || (selectedFields.isEmpty() && (field == "text" || field == "body"))
+                FilterChip(
+                    selected = isSelected,
+                    onClick = { toggleField(field) },
+                    label = { Text(label, fontSize = 12.sp) },
+                    colors = FilterChipDefaults.filterChipColors(
+                        selectedContainerColor = PrimaryBlue,
+                        selectedLabelColor = Color.White,
+                        containerColor = CardBackground,
+                        labelColor = TextGray
+                    )
+                )
             }
         }
     }

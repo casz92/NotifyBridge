@@ -42,8 +42,15 @@ class NotificationListener : NotificationListenerService() {
                 if (rule.source == RuleSource.APP) {
                     val packages = rule.appPackageNames?.split(",")?.map { it.trim() } ?: emptyList()
                     if (packages.contains(packageName) || packages.contains("*")) {
-                        // 2. Verificar filtro Regex contra el contenido del texto de la notificación
-                        if (matchesPattern(text, rule.regexPattern)) {
+                        // 2. Verificar filtro Regex contra los campos especificados
+                        val fields = rule.regexMatchFields.split(",").map { it.trim() }.filter { it.isNotEmpty() }
+                        val matchTitle = fields.contains("title") || fields.contains("both") || fields.isEmpty()
+                        val matchText = fields.contains("text") || fields.contains("both") || fields.isEmpty()
+
+                        val isMatch = (matchTitle && matchesPattern(title, rule.regexPattern)) ||
+                                      (matchText && matchesPattern(text, rule.regexPattern))
+
+                        if (isMatch) {
                             // 3. Reemplazar variables en el payload body
                             val finalPayload = resolveVariables(
                                 template = rule.bodyTemplate,
