@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">NotifyBridge</string>
+    <string name="notification_listener_name">NotifyBridge Notification Listener</string>
+</resources>
