@@ -127,6 +127,11 @@ class SmsReceiver : BroadcastReceiver() {
                     .putLong("dispatch_id", dispatchId)
                     .build()
             )
+            .setBackoffCriteria(
+                androidx.work.BackoffPolicy.EXPONENTIAL,
+                androidx.work.WorkRequest.MIN_BACKOFF_MILLIS,
+                java.util.concurrent.TimeUnit.MILLISECONDS
+            )
             .build()
 
         WorkManager.getInstance(context).enqueue(workRequest)

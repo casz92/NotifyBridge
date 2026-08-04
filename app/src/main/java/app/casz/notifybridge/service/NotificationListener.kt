@@ -154,6 +154,11 @@ class NotificationListener : NotificationListenerService() {
                     .putLong("dispatch_id", dispatchId)
                     .build()
             )
+            .setBackoffCriteria(
+                androidx.work.BackoffPolicy.EXPONENTIAL,
+                androidx.work.WorkRequest.MIN_BACKOFF_MILLIS,
+                java.util.concurrent.TimeUnit.MILLISECONDS
+            )
             .build()
 
         // En una implementación real, actualizaríamos el dispatch en Room con el workRequest.id

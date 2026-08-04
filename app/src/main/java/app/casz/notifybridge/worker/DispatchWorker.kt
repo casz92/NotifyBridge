@@ -77,8 +77,8 @@ class DispatchWorker(
             val responseCode = response.code
             val responseBodyString = response.body?.string() ?: ""
 
-            if (response.isSuccessful) {
-                // Éxito
+            if (responseCode == 200 || responseCode == 201) {
+                // Éxito (200 o 201 completada)
                 val finalDispatch = dispatch.copy(
                     status = DispatchStatus.SUCCESS,
                     responseCode = responseCode,
@@ -86,8 +86,18 @@ class DispatchWorker(
                 )
                 updateDispatchInRoom(finalDispatch)
                 return Result.success()
+            } else if (responseCode == 401) {
+                // Fallo definitivo (401) sin reintentos
+                val finalDispatch = dispatch.copy(
+                    status = DispatchStatus.FAILED,
+                    responseCode = responseCode,
+                    responseBody = responseBodyString,
+                    errorMessage = "Unauthorized (401) - Fallo definitivo sin reintento"
+                )
+                updateDispatchInRoom(finalDispatch)
+                return Result.failure()
             } else {
-                // Error de servidor (código != 2xx)
+                // Otro error HTTP, reintentar con plazo ponderado (Result.retry())
                 return handleFailure(dispatch, "HTTP Error: $responseCode", responseCode, responseBodyString)
             }
         } catch (e: IOException) {

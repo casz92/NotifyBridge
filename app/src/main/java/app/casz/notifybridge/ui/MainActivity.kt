@@ -669,7 +669,7 @@ fun RuleCard(
         modifier = Modifier
             .fillMaxWidth()
             .combinedClickable(
-                onClick = {},
+                onClick = onEdit,
                 onLongClick = { showMenu = true }
             ),
         shape = RoundedCornerShape(12.dp),
@@ -717,8 +717,8 @@ fun RuleCard(
                             .padding(horizontal = 6.dp, vertical = 2.dp)
                     )
                     Spacer(modifier = Modifier.width(8.dp))
-                    IconButton(onClick = onEdit, modifier = Modifier.size(24.dp)) {
-                        Icon(Icons.Default.Edit, contentDescription = "Editar", tint = TextLight)
+                    IconButton(onClick = onDelete, modifier = Modifier.size(24.dp)) {
+                        Icon(Icons.Default.Delete, contentDescription = "Eliminar", tint = Color.Red)
                     }
 
                     DropdownMenu(
