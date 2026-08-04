@@ -26,6 +26,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Send
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -58,6 +59,7 @@ class CreateRuleActivity : ComponentActivity() {
         val initialMethod = intent.getStringExtra(EXTRA_HTTP_METHOD)
         val initialHeadersJson = intent.getStringExtra(EXTRA_HEADERS_JSON)
         val initialBody = intent.getStringExtra(EXTRA_BODY_TEMPLATE)
+        val initialEnabled = intent.getBooleanExtra(EXTRA_RULE_ENABLED, true)
 
         setContent {
             NotifyBridgeTheme {
@@ -74,6 +76,7 @@ class CreateRuleActivity : ComponentActivity() {
                     initialMethod = initialMethod,
                     initialHeadersJson = initialHeadersJson,
                     initialBody = initialBody,
+                    initialEnabled = initialEnabled,
                     onBack = {
                         clearRuleDraft(this@CreateRuleActivity)
                         finish()
@@ -92,6 +95,7 @@ class CreateRuleActivity : ComponentActivity() {
                             putExtra(EXTRA_HTTP_METHOD, rule.httpMethod)
                             putExtra(EXTRA_HEADERS_JSON, rule.headersJson)
                             putExtra(EXTRA_BODY_TEMPLATE, rule.bodyTemplate)
+                            putExtra(EXTRA_RULE_ENABLED, rule.enabled)
                         }
                         setResult(Activity.RESULT_OK, resultIntent)
                         finish()
@@ -114,6 +118,7 @@ class CreateRuleActivity : ComponentActivity() {
         const val EXTRA_HTTP_METHOD = "extra_http_method"
         const val EXTRA_HEADERS_JSON = "extra_headers_json"
         const val EXTRA_BODY_TEMPLATE = "extra_body_template"
+        const val EXTRA_RULE_ENABLED = "extra_rule_enabled"
     }
 }
 
@@ -153,6 +158,7 @@ fun CreateRuleScreen(
     initialMethod: String?,
     initialHeadersJson: String?,
     initialBody: String?,
+    initialEnabled: Boolean = true,
     onBack: () -> Unit,
     onSaveRule: (RuleEntity) -> Unit
 ) {
@@ -285,6 +291,7 @@ fun CreateRuleScreen(
             put("headersJson", JSONObject(headersMap as Map<*, *>).toString())
             put("bodyFormat", bodyFormat)
             put("bodyTemplate", bodyTemplate)
+            put("enabled", initialEnabled)
         }
         saveRuleDraft(context, obj.toString())
     }
@@ -313,6 +320,47 @@ fun CreateRuleScreen(
                     }
                 },
                 actions = {
+                    var showSimulation by remember { mutableStateOf(false) }
+
+                    if (showSimulation) {
+                        val tempHeadersMap = mutableMapOf<String, String>()
+                        headerInputs.forEach { h ->
+                            if (h.key.isNotBlank()) {
+                                tempHeadersMap[h.key.trim()] = h.value.trim()
+                            }
+                        }
+                        val tempRule = RuleEntity(
+                            id = ruleId,
+                            name = ruleName.trim(),
+                            source = ruleSource,
+                            appPackageNames = if (ruleSource == RuleSource.APP) selectedPackages.joinToString(",") else null,
+                            regexPattern = regexPattern.ifBlank { ".*" },
+                            regexMatchFields = regexMatchFields,
+                            httpUrl = httpUrl.trim(),
+                            httpMethod = httpMethod,
+                            headersJson = JSONObject(tempHeadersMap as Map<*, *>).toString(),
+                            bodyTemplate = bodyTemplate,
+                            enabled = true
+                        )
+                        SimulationDialog(rule = tempRule, onDismiss = { showSimulation = false })
+                    }
+
+                    OutlinedButton(
+                        onClick = {
+                            if (httpUrl.isBlank() || httpUrl == "https://") {
+                                Toast.makeText(context, "Por favor, ingresa una URL destino para probar", Toast.LENGTH_SHORT).show()
+                            } else {
+                                showSimulation = true
+                            }
+                        },
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White),
+                        modifier = Modifier.padding(end = 8.dp)
+                    ) {
+                        Icon(Icons.Default.Send, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Probar")
+                    }
+
                     Button(
                         onClick = {
                             if (ruleName.isBlank()) {
@@ -343,7 +391,8 @@ fun CreateRuleScreen(
                                 httpUrl = httpUrl.trim(),
                                 httpMethod = httpMethod,
                                 headersJson = headersJson,
-                                bodyTemplate = bodyTemplate
+                                bodyTemplate = bodyTemplate,
+                                enabled = draftObj?.optBoolean("enabled", initialEnabled) ?: initialEnabled
                             )
                             onSaveRule(rule)
                         },

@@ -15,7 +15,8 @@ data class RuleEntity(
     val httpUrl: String,            // Destination URL
     val httpMethod: String,         // GET, POST, PUT etc.
     val headersJson: String,        // JSON serialized Map<String, String> of HTTP Headers
-    val bodyTemplate: String        // Template for request payload (allows placeholders like {not_text})
+    val bodyTemplate: String,       // Template for request payload (allows placeholders like {not_text})
+    val enabled: Boolean = true     // Active or inactive status of the rule
 )
 
 enum class RuleSource {

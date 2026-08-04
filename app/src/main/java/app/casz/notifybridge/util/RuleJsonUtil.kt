@@ -44,6 +44,7 @@ object RuleJsonUtil {
             ruleObj.put("regexMatchFields", rule.regexMatchFields)
             ruleObj.put("httpUrl", rule.httpUrl)
             ruleObj.put("httpMethod", rule.httpMethod)
+            ruleObj.put("enabled", rule.enabled)
 
             // Convert headersJson string -> "headers" JSONArray of {"header": "Key", "value": "Value"}
             val headersArray = JSONArray()
@@ -137,6 +138,7 @@ object RuleJsonUtil {
             val regexFields = obj.optString("regexMatchFields", "")
             val url = obj.optString("httpUrl", "https://")
             val method = obj.optString("httpMethod", "POST")
+            val enabled = obj.optBoolean("enabled", true)
 
             // Parse headers array [{"header": "Key", "value": "Value"}]
             val headersMap = mutableMapOf<String, String>()
@@ -201,7 +203,8 @@ object RuleJsonUtil {
                 httpUrl = url,
                 httpMethod = method,
                 headersJson = headersJson,
-                bodyTemplate = bodyTemplate
+                bodyTemplate = bodyTemplate,
+                enabled = enabled
             )
             importedRules.add(rule)
         }

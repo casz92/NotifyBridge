@@ -40,7 +40,7 @@ class ImapFetchWorker(
 
         // Cargar reglas e identificar la regla actual
         val rules = loadRules(appContext)
-        val rule = rules.firstOrNull { it.id == ruleId && it.source == RuleSource.IMAP }
+        val rule = rules.firstOrNull { it.id == ruleId && it.source == RuleSource.IMAP && it.enabled }
             ?: return Result.failure()
 
         // Cargar credenciales de DataStore

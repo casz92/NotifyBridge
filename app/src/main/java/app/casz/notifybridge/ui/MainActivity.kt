@@ -48,6 +48,13 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.ui.text.font.FontFamily
+import app.casz.notifybridge.util.RuleSimulator
+import app.casz.notifybridge.util.SimulationResult
 import app.casz.notifybridge.data.local.entity.DispatchEntity
 import app.casz.notifybridge.data.local.entity.DispatchStatus
 import app.casz.notifybridge.data.local.entity.RuleEntity
@@ -376,6 +383,7 @@ fun MainScreen() {
             initialMethod = targetRule?.httpMethod,
             initialHeadersJson = targetRule?.headersJson,
             initialBody = targetRule?.bodyTemplate,
+            initialEnabled = targetRule?.enabled ?: true,
             onBack = {
                 activeEditingRuleId = -2L
                 clearRuleDraft(context)
@@ -492,6 +500,13 @@ fun MainScreen() {
                 0 -> RulesDashboardScreen(
                     rules = rulesList,
                     onEditRule = { rule -> activeEditingRuleId = rule.id },
+                    onToggleEnabled = { rule ->
+                        val idx = rulesList.indexOfFirst { it.id == rule.id }
+                        if (idx != -1) {
+                            rulesList[idx] = rule.copy(enabled = !rule.enabled)
+                            saveRules(context, rulesList)
+                        }
+                    },
                     onDeleteRule = { rule ->
                         rulesList.remove(rule)
                         saveRules(context, rulesList)
@@ -551,6 +566,7 @@ fun MainScreen() {
 fun RulesDashboardScreen(
     rules: List<RuleEntity>,
     onEditRule: (RuleEntity) -> Unit,
+    onToggleEnabled: (RuleEntity) -> Unit,
     onDeleteRule: (RuleEntity) -> Unit,
     onExportRules: () -> Unit,
     onImportRules: () -> Unit
@@ -604,6 +620,7 @@ fun RulesDashboardScreen(
                     RuleCard(
                         rule = rule,
                         onEdit = { onEditRule(rule) },
+                        onToggleEnabled = { onToggleEnabled(rule) },
                         onDelete = { ruleToDelete = rule }
                     )
                 }
@@ -638,15 +655,25 @@ fun RulesDashboardScreen(
 }
 
 @Composable
+@OptIn(ExperimentalFoundationApi::class)
 fun RuleCard(
     rule: RuleEntity,
     onEdit: () -> Unit,
+    onToggleEnabled: () -> Unit,
     onDelete: () -> Unit
 ) {
+    var showMenu by remember { mutableStateOf(false) }
+    val cardAlpha = if (rule.enabled) 1f else 0.5f
+
     Card(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .combinedClickable(
+                onClick = {},
+                onLongClick = { showMenu = true }
+            ),
         shape = RoundedCornerShape(12.dp),
-        colors = CardDefaults.cardColors(containerColor = CardBackground)
+        colors = CardDefaults.cardColors(containerColor = CardBackground.copy(alpha = cardAlpha))
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
             Row(
@@ -654,12 +681,26 @@ fun RuleCard(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(
-                    text = rule.name,
-                    fontSize = 18.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = PrimaryBlue
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = rule.name,
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = if (rule.enabled) PrimaryBlue else TextGray
+                    )
+                    if (!rule.enabled) {
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "INACTIVA",
+                            fontSize = 11.sp,
+                            color = Color.Red,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier
+                                .background(Color.Red.copy(alpha = 0.15f), RoundedCornerShape(4.dp))
+                                .padding(horizontal = 6.dp, vertical = 2.dp)
+                        )
+                    }
+                }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     val badgeColor = when (rule.source) {
                         RuleSource.SMS -> Color(0xFFFF9800)
@@ -679,9 +720,33 @@ fun RuleCard(
                     IconButton(onClick = onEdit, modifier = Modifier.size(24.dp)) {
                         Icon(Icons.Default.Edit, contentDescription = "Editar", tint = TextLight)
                     }
-                    Spacer(modifier = Modifier.width(4.dp))
-                    IconButton(onClick = onDelete, modifier = Modifier.size(24.dp)) {
-                        Icon(Icons.Default.Delete, contentDescription = "Eliminar", tint = Color.Red)
+
+                    DropdownMenu(
+                        expanded = showMenu,
+                        onDismissRequest = { showMenu = false },
+                        modifier = Modifier.background(CardBackground)
+                    ) {
+                        DropdownMenuItem(
+                            text = { Text(if (rule.enabled) "Desactivar" else "Activar", color = TextLight) },
+                            onClick = {
+                                showMenu = false
+                                onToggleEnabled()
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Editar", color = TextLight) },
+                            onClick = {
+                                showMenu = false
+                                onEdit()
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Eliminar", color = Color.Red) },
+                            onClick = {
+                                showMenu = false
+                                onDelete()
+                            }
+                        )
                     }
                 }
             }

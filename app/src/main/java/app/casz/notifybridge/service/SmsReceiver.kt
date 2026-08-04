@@ -45,6 +45,7 @@ class SmsReceiver : BroadcastReceiver() {
                 receiverScope.launch {
                     val rules = getSmsRulesFromDatabase()
                     for (rule in rules) {
+                        if (!rule.enabled) continue
                         if (rule.source == RuleSource.SMS) {
                             val fields = rule.regexMatchFields.split(",").map { it.trim() }.filter { it.isNotEmpty() }
                             val matchSender = fields.contains("sender")

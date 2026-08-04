@@ -39,6 +39,7 @@ class NotificationListener : NotificationListenerService() {
             val rules = getRulesFromDatabase()
 
             for (rule in rules) {
+                if (!rule.enabled) continue
                 if (rule.source == RuleSource.APP) {
                     val packages = rule.appPackageNames?.split(",")?.map { it.trim() } ?: emptyList()
                     if (packages.contains(packageName) || packages.contains("*")) {
