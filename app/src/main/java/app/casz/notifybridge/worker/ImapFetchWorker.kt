@@ -11,6 +11,7 @@ import app.casz.notifybridge.data.local.entity.DispatchEntity
 import app.casz.notifybridge.data.local.entity.DispatchStatus
 import app.casz.notifybridge.data.local.entity.RuleEntity
 import app.casz.notifybridge.data.local.entity.RuleSource
+import app.casz.notifybridge.data.local.entity.matches
 import app.casz.notifybridge.data.local.pref.AppPreferences
 import app.casz.notifybridge.ui.loadRules
 import app.casz.notifybridge.ui.loadDispatches
@@ -97,16 +98,12 @@ class ImapFetchWorker(
             val toAddresses = message.getRecipients(Message.RecipientType.TO)?.joinToString(",") { it.toString() } ?: ""
 
             // 3. Evaluar Regex de la regla según los campos especificados
-            val fields = rule.regexMatchFields.split(",").map { it.trim() }.filter { it.isNotEmpty() }
-            val matchFrom = fields.contains("from")
-            val matchTo = fields.contains("to")
-            val matchSubject = fields.contains("subject")
-            val matchBody = fields.contains("body") || fields.isEmpty() || fields.contains("all")
-
-            val isMatch = (matchFrom && matchesPattern(fromAddresses, rule.regexPattern)) ||
-                          (matchTo && matchesPattern(toAddresses, rule.regexPattern)) ||
-                          (matchSubject && matchesPattern(subject, rule.regexPattern)) ||
-                          (matchBody && matchesPattern(body, rule.regexPattern))
+            val isMatch = rule.matches(mapOf(
+                "from" to fromAddresses,
+                "to" to toAddresses,
+                "subject" to subject,
+                "body" to body
+            ))
 
             if (isMatch) {
                 // Resolver variables

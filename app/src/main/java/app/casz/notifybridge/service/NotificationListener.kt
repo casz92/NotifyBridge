@@ -12,6 +12,7 @@ import app.casz.notifybridge.data.local.entity.DispatchEntity
 import app.casz.notifybridge.data.local.entity.DispatchStatus
 import app.casz.notifybridge.data.local.entity.RuleEntity
 import app.casz.notifybridge.data.local.entity.RuleSource
+import app.casz.notifybridge.data.local.entity.matches
 import app.casz.notifybridge.worker.DispatchWorker
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -34,8 +35,21 @@ class NotificationListener : NotificationListenerService() {
         val notId = sbn.id.toString()
         val systemTime = System.currentTimeMillis().toString()
 
+        // 1. Evitar procesar exactamente el mismo contenido para la misma notificación si ya se procesó
+        if (isNotificationDuplicate(packageName, notId, title, text)) {
+            Log.d("NotificationListener", "Notificación duplicada ignorada: pkg=$packageName, id=$notId, title=$title")
+            return
+        }
+
+        // 2. Extraer sólo el nuevo fragmento de texto si es una actualización de chat (WhatsApp, Telegram, etc.)
+        val processedText = getNewTextForChat(packageName, title, text)
+        if (processedText.isBlank()) {
+            Log.d("NotificationListener", "No hay contenido nuevo en la actualización de la notificación")
+            return
+        }
+
         serviceScope.launch {
-            // 1. Obtener reglas activas de Room para apps e IMAP
+            // 3. Obtener reglas activas de Room para apps e IMAP
             val rules = getRulesFromDatabase()
 
             for (rule in rules) {
@@ -43,29 +57,24 @@ class NotificationListener : NotificationListenerService() {
                 if (rule.source == RuleSource.APP) {
                     val packages = rule.appPackageNames?.split(",")?.map { it.trim() } ?: emptyList()
                     if (packages.contains(packageName) || packages.contains("*")) {
-                        // 2. Verificar filtro Regex contra los campos especificados
-                        val fields = rule.regexMatchFields.split(",").map { it.trim() }.filter { it.isNotEmpty() }
-                        val matchTitle = fields.contains("title") || fields.contains("both") || fields.isEmpty()
-                        val matchText = fields.contains("text") || fields.contains("both") || fields.isEmpty()
-
-                        val isMatch = (matchTitle && matchesPattern(title, rule.regexPattern)) ||
-                                      (matchText && matchesPattern(text, rule.regexPattern))
+                        // 4. Verificar filtro Regex usando bloques múltiples (AND/OR)
+                        val isMatch = rule.matches(mapOf("title" to title, "text" to processedText))
 
                         if (isMatch) {
-                            // 3. Reemplazar variables en el payload body
+                            // 5. Reemplazar variables en el payload body usando el texto procesado (nuevo)
                             val finalPayload = resolveVariables(
                                 template = rule.bodyTemplate,
                                 title = title,
                                 id = notId,
-                                text = text,
+                                text = processedText,
                                 systemTime = systemTime,
                                 packageName = packageName
                             )
 
-                            // 4. Crear entidad de Envío (DispatchEntity) con estado PENDING
+                            // 6. Crear entidad de Envío (DispatchEntity) con estado PENDING
                             val dispatchId = savePendingDispatch(rule, finalPayload, "App: $packageName")
 
-                            // 5. Encolar la tarea con WorkManager
+                            // 7. Encolar la tarea con WorkManager
                             enqueueWork(dispatchId)
                         }
                     }
@@ -77,7 +86,48 @@ class NotificationListener : NotificationListenerService() {
                     }
                 }
             }
+
+            // Registrar en el historial de procesados e historial de chats si al menos se procesó la notificación
+            markNotificationProcessed(packageName, notId, title, text)
+            updateChatHistory(packageName, title, text)
         }
+    }
+
+    private fun isNotificationDuplicate(packageName: String, notId: String, title: String, text: String): Boolean {
+        val prefs = applicationContext.getSharedPreferences("notification_dedup_prefs", Context.MODE_PRIVATE)
+        val key = "${packageName}_${notId}_${title}_${text.hashCode()}"
+        return prefs.contains(key)
+    }
+
+    private fun markNotificationProcessed(packageName: String, notId: String, title: String, text: String) {
+        val prefs = applicationContext.getSharedPreferences("notification_dedup_prefs", Context.MODE_PRIVATE)
+        val key = "${packageName}_${notId}_${title}_${text.hashCode()}"
+        prefs.edit().putLong(key, System.currentTimeMillis()).apply()
+    }
+
+    private fun getNewTextForChat(packageName: String, title: String, currentText: String): String {
+        if (title.isBlank() || currentText.isBlank()) return currentText
+        val prefs = applicationContext.getSharedPreferences("notification_chat_history", Context.MODE_PRIVATE)
+        val key = "${packageName}_${title}"
+        val lastText = prefs.getString(key, "") ?: ""
+
+        if (lastText.isNotEmpty() && currentText.startsWith(lastText)) {
+            val newPart = currentText.substring(lastText.length)
+            val trimmedNewPart = newPart.trimStart('\n', '\r', ' ')
+            if (trimmedNewPart.isNotEmpty()) {
+                return trimmedNewPart
+            } else {
+                return "" // No hay contenido nuevo real
+            }
+        }
+        return currentText
+    }
+
+    private fun updateChatHistory(packageName: String, title: String, currentText: String) {
+        if (title.isBlank() || currentText.isBlank()) return
+        val prefs = applicationContext.getSharedPreferences("notification_chat_history", Context.MODE_PRIVATE)
+        val key = "${packageName}_${title}"
+        prefs.edit().putString(key, currentText).apply()
     }
 
     private fun enqueueImapFetchWork(ruleId: Long) {

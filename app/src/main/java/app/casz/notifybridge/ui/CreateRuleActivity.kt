@@ -41,7 +41,11 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import app.casz.notifybridge.data.local.entity.RuleEntity
 import app.casz.notifybridge.data.local.entity.RuleSource
+import app.casz.notifybridge.data.local.entity.RegexBlock
+import app.casz.notifybridge.data.local.entity.getEffectiveRegexBlocks
+import androidx.compose.runtime.snapshots.SnapshotStateList
 import org.json.JSONObject
+
 class CreateRuleActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -60,6 +64,7 @@ class CreateRuleActivity : ComponentActivity() {
         val initialHeadersJson = intent.getStringExtra(EXTRA_HEADERS_JSON)
         val initialBody = intent.getStringExtra(EXTRA_BODY_TEMPLATE)
         val initialEnabled = intent.getBooleanExtra(EXTRA_RULE_ENABLED, true)
+        val initialRegexBlocksJson = intent.getStringExtra(EXTRA_REGEX_BLOCKS_JSON)
 
         setContent {
             NotifyBridgeTheme {
@@ -77,6 +82,7 @@ class CreateRuleActivity : ComponentActivity() {
                     initialHeadersJson = initialHeadersJson,
                     initialBody = initialBody,
                     initialEnabled = initialEnabled,
+                    initialRegexBlocksJson = initialRegexBlocksJson,
                     onBack = {
                         clearRuleDraft(this@CreateRuleActivity)
                         finish()
@@ -96,6 +102,7 @@ class CreateRuleActivity : ComponentActivity() {
                             putExtra(EXTRA_HEADERS_JSON, rule.headersJson)
                             putExtra(EXTRA_BODY_TEMPLATE, rule.bodyTemplate)
                             putExtra(EXTRA_RULE_ENABLED, rule.enabled)
+                            putExtra(EXTRA_REGEX_BLOCKS_JSON, rule.regexBlocksJson)
                         }
                         setResult(Activity.RESULT_OK, resultIntent)
                         finish()
@@ -119,6 +126,7 @@ class CreateRuleActivity : ComponentActivity() {
         const val EXTRA_HEADERS_JSON = "extra_headers_json"
         const val EXTRA_BODY_TEMPLATE = "extra_body_template"
         const val EXTRA_RULE_ENABLED = "extra_rule_enabled"
+        const val EXTRA_REGEX_BLOCKS_JSON = "extra_regex_blocks_json"
     }
 }
 
@@ -159,6 +167,7 @@ fun CreateRuleScreen(
     initialHeadersJson: String?,
     initialBody: String?,
     initialEnabled: Boolean = true,
+    initialRegexBlocksJson: String? = null,
     onBack: () -> Unit,
     onSaveRule: (RuleEntity) -> Unit
 ) {
@@ -197,18 +206,39 @@ fun CreateRuleScreen(
             }
         )
     }
-    var regexPattern by rememberSaveable {
-        mutableStateOf(
-            if (draftObj != null && draftObj.has("regexPattern")) draftObj.getString("regexPattern")
-            else (initialRegex ?: ".*")
-        )
+
+    val initialBlocks = remember {
+        val list = mutableListOf<RegexBlock>()
+        val draftBlocksJson = if (draftObj != null && draftObj.has("regexBlocksJson")) draftObj.getString("regexBlocksJson") else null
+        val blocksJsonToUse = draftBlocksJson ?: (initialRegexBlocksJson ?: "")
+        if (!blocksJsonToUse.isNullOrBlank()) {
+            try {
+                val arr = org.json.JSONArray(blocksJsonToUse)
+                for (i in 0 until arr.length()) {
+                    val obj = arr.getJSONObject(i)
+                    list.add(
+                        RegexBlock(
+                            pattern = obj.optString("pattern", ""),
+                            matchFields = obj.optString("matchFields", ""),
+                            nextOperator = obj.optString("nextOperator", "NONE")
+                        )
+                    )
+                }
+            } catch (_: Exception) {}
+        }
+        if (list.isEmpty()) {
+            list.add(
+                RegexBlock(
+                    pattern = initialRegex ?: ".*",
+                    matchFields = initialRegexFields ?: "",
+                    nextOperator = "NONE"
+                )
+            )
+        }
+        list
     }
-    var regexMatchFields by rememberSaveable {
-        mutableStateOf(
-            if (draftObj != null && draftObj.has("regexMatchFields")) draftObj.getString("regexMatchFields")
-            else (initialRegexFields ?: "")
-        )
-    }
+
+    val regexBlocks = remember { mutableStateListOf<RegexBlock>().apply { addAll(initialBlocks) } }
 
     var httpUrl by rememberSaveable {
         mutableStateOf(
@@ -269,12 +299,20 @@ fun CreateRuleScreen(
     }
 
     // Guardado automatico en tiempo real del borrador
-    LaunchedEffect(selectedTab, ruleName, ruleSource, selectedPackages, regexPattern, regexMatchFields, httpUrl, httpMethod, bodyFormat, bodyTemplate, headerInputs.toList()) {
+    LaunchedEffect(selectedTab, ruleName, ruleSource, selectedPackages, regexBlocks.toList(), httpUrl, httpMethod, bodyFormat, bodyTemplate, headerInputs.toList()) {
         val headersMap = mutableMapOf<String, String>()
         headerInputs.forEach { h ->
             if (h.key.isNotBlank()) {
                 headersMap[h.key.trim()] = h.value.trim()
             }
+        }
+        val blocksArray = org.json.JSONArray()
+        regexBlocks.forEach { block ->
+            blocksArray.put(org.json.JSONObject().apply {
+                put("pattern", block.pattern)
+                put("matchFields", block.matchFields)
+                put("nextOperator", block.nextOperator)
+            })
         }
         val obj = JSONObject().apply {
             put("isEdit", isEdit)
@@ -284,8 +322,9 @@ fun CreateRuleScreen(
             put("ruleName", ruleName)
             put("ruleSource", ruleSource.name)
             put("selectedPackages", selectedPackages.joinToString(","))
-            put("regexPattern", regexPattern)
-            put("regexMatchFields", regexMatchFields)
+            put("regexPattern", regexBlocks.firstOrNull()?.pattern ?: ".*")
+            put("regexMatchFields", regexBlocks.firstOrNull()?.matchFields ?: "")
+            put("regexBlocksJson", blocksArray.toString())
             put("httpUrl", httpUrl)
             put("httpMethod", httpMethod)
             put("headersJson", JSONObject(headersMap as Map<*, *>).toString())
@@ -329,18 +368,27 @@ fun CreateRuleScreen(
                                 tempHeadersMap[h.key.trim()] = h.value.trim()
                             }
                         }
+                        val blocksArray = org.json.JSONArray()
+                        regexBlocks.forEach { block ->
+                            blocksArray.put(org.json.JSONObject().apply {
+                                put("pattern", block.pattern)
+                                put("matchFields", block.matchFields)
+                                put("nextOperator", block.nextOperator)
+                            })
+                        }
                         val tempRule = RuleEntity(
                             id = ruleId,
                             name = ruleName.trim(),
                             source = ruleSource,
                             appPackageNames = if (ruleSource == RuleSource.APP) selectedPackages.joinToString(",") else null,
-                            regexPattern = regexPattern.ifBlank { ".*" },
-                            regexMatchFields = regexMatchFields,
+                            regexPattern = regexBlocks.firstOrNull()?.pattern?.ifBlank { ".*" } ?: ".*",
+                            regexMatchFields = regexBlocks.firstOrNull()?.matchFields ?: "",
                             httpUrl = httpUrl.trim(),
                             httpMethod = httpMethod,
                             headersJson = JSONObject(tempHeadersMap as Map<*, *>).toString(),
                             bodyTemplate = bodyTemplate,
-                            enabled = true
+                            enabled = true,
+                            regexBlocksJson = blocksArray.toString()
                         )
                         SimulationDialog(rule = tempRule, onDismiss = { showSimulation = false })
                     }
@@ -381,18 +429,28 @@ fun CreateRuleScreen(
                             }
                             val headersJson = JSONObject(headersMap as Map<*, *>).toString()
 
+                            val blocksArray = org.json.JSONArray()
+                            regexBlocks.forEach { block ->
+                                blocksArray.put(org.json.JSONObject().apply {
+                                    put("pattern", block.pattern)
+                                    put("matchFields", block.matchFields)
+                                    put("nextOperator", block.nextOperator)
+                                })
+                            }
+
                             val rule = RuleEntity(
                                 id = ruleId,
                                 name = ruleName.trim(),
                                 source = ruleSource,
                                 appPackageNames = if (ruleSource == RuleSource.APP) selectedPackages.joinToString(",") else null,
-                                regexPattern = regexPattern.ifBlank { ".*" },
-                                regexMatchFields = regexMatchFields,
+                                regexPattern = regexBlocks.firstOrNull()?.pattern?.ifBlank { ".*" } ?: ".*",
+                                regexMatchFields = regexBlocks.firstOrNull()?.matchFields ?: "",
                                 httpUrl = httpUrl.trim(),
                                 httpMethod = httpMethod,
                                 headersJson = headersJson,
                                 bodyTemplate = bodyTemplate,
-                                enabled = draftObj?.optBoolean("enabled", initialEnabled) ?: initialEnabled
+                                enabled = draftObj?.optBoolean("enabled", initialEnabled) ?: initialEnabled,
+                                regexBlocksJson = blocksArray.toString()
                             )
                             onSaveRule(rule)
                         },
@@ -451,10 +509,7 @@ fun CreateRuleScreen(
                         onSourceChange = { ruleSource = it },
                         selectedPackages = selectedPackages,
                         onOpenAppPicker = { showAppPicker = true },
-                        regexPattern = regexPattern,
-                        onRegexChange = { regexPattern = it },
-                        regexMatchFields = regexMatchFields,
-                        onRegexMatchFieldsChange = { regexMatchFields = it },
+                        regexBlocks = regexBlocks,
                         httpUrl = httpUrl,
                         onUrlChange = { httpUrl = it },
                         httpMethod = httpMethod,
@@ -505,10 +560,7 @@ fun GeneralTabContent(
     onSourceChange: (RuleSource) -> Unit,
     selectedPackages: Set<String>,
     onOpenAppPicker: () -> Unit,
-    regexPattern: String,
-    onRegexChange: (String) -> Unit,
-    regexMatchFields: String,
-    onRegexMatchFieldsChange: (String) -> Unit,
+    regexBlocks: SnapshotStateList<RegexBlock>,
     httpUrl: String,
     onUrlChange: (String) -> Unit,
     httpMethod: String,
@@ -618,21 +670,9 @@ fun GeneralTabContent(
         }
 
         item {
-            OutlinedTextField(
-                value = regexPattern,
-                onValueChange = onRegexChange,
-                label = { Text("Filtro Expresión Regular (RegEx)") },
-                supportingText = { Text("Ejemplo: .*urgente.* o .*OTP.*") },
-                modifier = Modifier.fillMaxWidth(),
-                colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = PrimaryBlue)
-            )
-        }
-
-        item {
-            RegexMatchFieldsSelector(
+            RegexBlocksEditor(
                 source = ruleSource,
-                selectedFieldsString = regexMatchFields,
-                onFieldsChange = onRegexMatchFieldsChange
+                blocks = regexBlocks
             )
         }
 
@@ -1269,6 +1309,132 @@ fun RegexMatchFieldsSelector(
                         labelColor = TextGray
                     )
                 )
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun RegexBlocksEditor(
+    source: RuleSource,
+    blocks: SnapshotStateList<RegexBlock>
+) {
+    Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("Filtros Regex (Múltiples)", fontWeight = FontWeight.Bold, color = PrimaryBlue, fontSize = 15.sp)
+            Button(
+                onClick = {
+                    if (blocks.isNotEmpty()) {
+                        val lastIdx = blocks.size - 1
+                        blocks[lastIdx] = blocks[lastIdx].copy(
+                            nextOperator = if (blocks[lastIdx].nextOperator == "NONE") "AND" else blocks[lastIdx].nextOperator
+                        )
+                    }
+                    blocks.add(RegexBlock(pattern = "", matchFields = "", nextOperator = "NONE"))
+                },
+                colors = ButtonDefaults.buttonColors(containerColor = PrimaryBlue),
+                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                modifier = Modifier.height(28.dp)
+            ) {
+                Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(14.dp))
+                Spacer(modifier = Modifier.width(4.dp))
+                Text("Añadir Condición", fontSize = 11.sp)
+            }
+        }
+
+        blocks.forEachIndexed { index, block ->
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(10.dp),
+                colors = CardDefaults.cardColors(containerColor = CardBackground)
+            ) {
+                Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Condición #${index + 1}",
+                            fontWeight = FontWeight.SemiBold,
+                            color = TextLight,
+                            fontSize = 13.sp
+                        )
+                        if (blocks.size > 1) {
+                            IconButton(
+                                onClick = {
+                                    blocks.removeAt(index)
+                                    if (blocks.isEmpty()) {
+                                        blocks.add(RegexBlock(pattern = ".*", matchFields = "", nextOperator = "NONE"))
+                                    } else {
+                                        val lastIdx = blocks.size - 1
+                                        blocks[lastIdx] = blocks[lastIdx].copy(nextOperator = "NONE")
+                                    }
+                                },
+                                modifier = Modifier.size(24.dp)
+                            ) {
+                                Icon(Icons.Default.Delete, contentDescription = "Eliminar", tint = Color.Red, modifier = Modifier.size(16.dp))
+                            }
+                        }
+                    }
+
+                    OutlinedTextField(
+                        value = block.pattern,
+                        onValueChange = { newPattern ->
+                            blocks[index] = blocks[index].copy(pattern = newPattern)
+                        },
+                        label = { Text("Regex Pattern", fontSize = 12.sp) },
+                        placeholder = { Text("ej: .*OTP.*") },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = PrimaryBlue)
+                    )
+
+                    RegexMatchFieldsSelector(
+                        source = source,
+                        selectedFieldsString = block.matchFields,
+                        onFieldsChange = { newFields ->
+                            blocks[index] = blocks[index].copy(matchFields = newFields)
+                        }
+                    )
+                }
+            }
+
+            if (index < blocks.size - 1) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.Center,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    val isAnd = block.nextOperator == "AND"
+                    FilterChip(
+                        selected = isAnd,
+                        onClick = {
+                            blocks[index] = blocks[index].copy(nextOperator = "AND")
+                        },
+                        label = { Text("AND (Y)", fontSize = 11.sp) },
+                        colors = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = PrimaryBlue,
+                            selectedLabelColor = Color.White
+                        )
+                    )
+                    Spacer(modifier = Modifier.width(16.dp))
+                    FilterChip(
+                        selected = !isAnd,
+                        onClick = {
+                            blocks[index] = blocks[index].copy(nextOperator = "OR")
+                        },
+                        label = { Text("OR (O)", fontSize = 11.sp) },
+                        colors = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = PrimaryBlue,
+                            selectedLabelColor = Color.White
+                        )
+                    )
+                }
             }
         }
     }

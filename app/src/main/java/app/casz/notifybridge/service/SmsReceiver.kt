@@ -10,6 +10,7 @@ import androidx.work.OneTimeWorkRequest
 import androidx.work.WorkManager
 import app.casz.notifybridge.data.local.entity.RuleEntity
 import app.casz.notifybridge.data.local.entity.RuleSource
+import app.casz.notifybridge.data.local.entity.matches
 import app.casz.notifybridge.worker.DispatchWorker
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -47,14 +48,7 @@ class SmsReceiver : BroadcastReceiver() {
                     for (rule in rules) {
                         if (!rule.enabled) continue
                         if (rule.source == RuleSource.SMS) {
-                            val fields = rule.regexMatchFields.split(",").map { it.trim() }.filter { it.isNotEmpty() }
-                            val matchSender = fields.contains("sender")
-                            val matchRecipient = fields.contains("recipient")
-                            val matchBody = fields.contains("body") || fields.isEmpty() || fields.contains("all")
-
-                            val isMatch = (matchSender && matchesPattern(sender, rule.regexPattern)) ||
-                                          (matchRecipient && recipient.isNotBlank() && matchesPattern(recipient, rule.regexPattern)) ||
-                                          (matchBody && matchesPattern(body, rule.regexPattern))
+                            val isMatch = rule.matches(mapOf("sender" to sender, "recipient" to recipient, "body" to body))
 
                             if (isMatch) {
                                 val finalPayload = resolveVariables(

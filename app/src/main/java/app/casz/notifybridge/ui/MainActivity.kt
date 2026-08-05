@@ -59,6 +59,7 @@ import app.casz.notifybridge.data.local.entity.DispatchEntity
 import app.casz.notifybridge.data.local.entity.DispatchStatus
 import app.casz.notifybridge.data.local.entity.RuleEntity
 import app.casz.notifybridge.data.local.entity.RuleSource
+import app.casz.notifybridge.data.local.entity.getEffectiveRegexBlocks
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -315,6 +316,19 @@ fun MainScreen() {
         }
     }
 
+    LaunchedEffect(selectedTab) {
+        if (selectedTab == 1) {
+            while (true) {
+                val updated = loadDispatches(context)
+                if (updated != dispatchesList) {
+                    dispatchesList.clear()
+                    dispatchesList.addAll(updated)
+                }
+                kotlinx.coroutines.delay(2000)
+            }
+        }
+    }
+
     // Export Rules Launcher
     val exportLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.CreateDocument("application/json")
@@ -384,6 +398,7 @@ fun MainScreen() {
             initialHeadersJson = targetRule?.headersJson,
             initialBody = targetRule?.bodyTemplate,
             initialEnabled = targetRule?.enabled ?: true,
+            initialRegexBlocksJson = targetRule?.regexBlocksJson,
             onBack = {
                 activeEditingRuleId = -2L
                 clearRuleDraft(context)
@@ -758,7 +773,13 @@ fun RuleCard(
             if (rule.source == RuleSource.APP) {
                 Text("Apps: ${rule.appPackageNames}", fontSize = 14.sp, color = TextLight)
             }
-            Text("Filtro Regex: \"${rule.regexPattern}\"", fontSize = 14.sp, color = TextLight, fontWeight = FontWeight.SemiBold)
+            val blocks = rule.getEffectiveRegexBlocks()
+            val regexSummary = if (blocks.size > 1) {
+                "Filtro Regex: \"${blocks.first().pattern}\" (+${blocks.size - 1} más)"
+            } else {
+                "Filtro Regex: \"${rule.regexPattern}\""
+            }
+            Text(regexSummary, fontSize = 14.sp, color = TextLight, fontWeight = FontWeight.SemiBold)
             Text("Destino: [${rule.httpMethod}] ${rule.httpUrl}", fontSize = 14.sp, color = TextGray, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
     }
@@ -770,6 +791,7 @@ fun DispatchQueueScreen(
     dispatches: MutableList<DispatchEntity>,
     onSaveDispatches: () -> Unit = {}
 ) {
+    val context = LocalContext.current
     var queueTab by rememberSaveable { mutableIntStateOf(0) } // 0: Activos, 1: Historial
     var selectedDispatchDetails by remember { mutableStateOf<DispatchEntity?>(null) }
 
@@ -852,6 +874,14 @@ fun DispatchQueueScreen(
                         onCancel = {
                             val index = dispatches.indexOfFirst { it.id == item.id }
                             if (index != -1) {
+                                try {
+                                    item.workId?.let { workIdStr ->
+                                        val uuid = java.util.UUID.fromString(workIdStr)
+                                        androidx.work.WorkManager.getInstance(context).cancelWorkById(uuid)
+                                    }
+                                } catch (e: Exception) {
+                                    android.util.Log.e("MainActivity", "Error cancelando work: ${e.message}")
+                                }
                                 dispatches[index] = item.copy(status = DispatchStatus.CANCELLED)
                                 onSaveDispatches()
                             }
@@ -859,7 +889,26 @@ fun DispatchQueueScreen(
                         onResend = {
                             val index = dispatches.indexOfFirst { it.id == item.id }
                             if (index != -1) {
-                                dispatches[index] = item.copy(status = DispatchStatus.PENDING, attempts = 0)
+                                val workRequest = androidx.work.OneTimeWorkRequest.Builder(app.casz.notifybridge.worker.DispatchWorker::class.java)
+                                    .setInputData(
+                                        androidx.work.Data.Builder()
+                                            .putLong("dispatch_id", item.id)
+                                            .build()
+                                    )
+                                    .setBackoffCriteria(
+                                        androidx.work.BackoffPolicy.EXPONENTIAL,
+                                        androidx.work.WorkRequest.MIN_BACKOFF_MILLIS,
+                                        java.util.concurrent.TimeUnit.MILLISECONDS
+                                    )
+                                    .build()
+
+                                androidx.work.WorkManager.getInstance(context).enqueue(workRequest)
+
+                                dispatches[index] = item.copy(
+                                    status = DispatchStatus.PENDING,
+                                    attempts = 0,
+                                    workId = workRequest.id.toString()
+                                )
                                 onSaveDispatches()
                             }
                         },
@@ -882,6 +931,7 @@ fun DispatchQueueScreen(
 }
 
 @Composable
+@OptIn(ExperimentalFoundationApi::class)
 fun DispatchItemCard(
     item: DispatchEntity,
     isHistoryItem: Boolean,
@@ -890,6 +940,7 @@ fun DispatchItemCard(
     onDeleteItem: () -> Unit,
     onClick: () -> Unit
 ) {
+    var showMenu by remember { mutableStateOf(false) }
     val statusColor = when (item.status) {
         DispatchStatus.PENDING -> Color(0xFFFFC107)
         DispatchStatus.PROCESSING -> Color(0xFF03A9F4)
@@ -904,7 +955,10 @@ fun DispatchItemCard(
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable { onClick() },
+            .combinedClickable(
+                onClick = onClick,
+                onLongClick = { showMenu = true }
+            ),
         shape = RoundedCornerShape(12.dp),
         colors = CardDefaults.cardColors(containerColor = CardBackground)
     ) {
@@ -938,6 +992,27 @@ fun DispatchItemCard(
                         IconButton(onClick = onDeleteItem, modifier = Modifier.size(20.dp)) {
                             Icon(Icons.Default.Delete, contentDescription = "Borrar", tint = Color.Red)
                         }
+                    }
+
+                    DropdownMenu(
+                        expanded = showMenu,
+                        onDismissRequest = { showMenu = false },
+                        modifier = Modifier.background(CardBackground)
+                    ) {
+                        DropdownMenuItem(
+                            text = { Text("Reenviar", color = TextLight) },
+                            onClick = {
+                                showMenu = false
+                                onResend()
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Delete", color = Color.Red) },
+                            onClick = {
+                                showMenu = false
+                                onDeleteItem()
+                            }
+                        )
                     }
                 }
             }
