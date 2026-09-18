@@ -13,9 +13,8 @@ import app.casz.notifybridge.data.local.entity.RuleEntity
 import app.casz.notifybridge.data.local.entity.RuleSource
 import app.casz.notifybridge.data.local.entity.matches
 import app.casz.notifybridge.data.local.pref.AppPreferences
-import app.casz.notifybridge.ui.loadRules
-import app.casz.notifybridge.ui.loadDispatches
-import app.casz.notifybridge.ui.saveDispatches
+import app.casz.notifybridge.data.repository.RulesRepository
+import app.casz.notifybridge.data.repository.DispatchRepository
 import kotlinx.coroutines.flow.first
 import org.json.JSONObject
 import java.util.Properties
@@ -40,7 +39,7 @@ class ImapFetchWorker(
         }
 
         // Cargar reglas e identificar la regla actual
-        val rules = loadRules(appContext)
+        val rules = RulesRepository.load(appContext)
         val rule = rules.firstOrNull { it.id == ruleId && it.source == RuleSource.IMAP && it.enabled }
             ?: return Result.failure()
 
@@ -126,7 +125,7 @@ class ImapFetchWorker(
                 // Marcar como procesado en la tabla de idempotencia local
                 markEmailAsProcessed(messageId)
             } else {
-                Log.d("ImapFetchWorker", "El correo no coincide con la expresión regular: ${rule.regexPattern}")
+                Log.d("ImapFetchWorker", "El correo no coincide con la regla: ${rule.regexPattern}")
             }
 
             // Marcar el mensaje como leído en el servidor IMAP
@@ -172,6 +171,7 @@ class ImapFetchWorker(
             .replace("{imap_to}", to)
             .replace("{timestamp}", systemTime)
             .replace("{system_time}", systemTime)
+            .replace("{device_uuid}", app.casz.notifybridge.util.DeviceUtil.getDeviceUuid(appContext))
     }
 
     private fun getTextFromMessage(message: Message): String {
@@ -212,7 +212,7 @@ class ImapFetchWorker(
     }
 
     private fun savePendingDispatch(rule: RuleEntity, payload: String, sourceInfo: String): Long {
-        val dispatches = loadDispatches(appContext).toMutableList()
+        val dispatches = DispatchRepository.load(appContext).toMutableList()
         val newId = System.currentTimeMillis()
         val newDispatch = DispatchEntity(
             id = newId,
@@ -228,7 +228,7 @@ class ImapFetchWorker(
             maxRetries = 3
         )
         dispatches.add(newDispatch)
-        saveDispatches(appContext, dispatches)
+        DispatchRepository.save(appContext, dispatches)
         return newId
     }
 

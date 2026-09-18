@@ -1,7 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
-<resources>
+<resources xmlns:tools="http://schemas.android.com/tools">
+    <!-- Pure Compose app — only window chrome config needed here -->
     <style name="Theme.NotifyBridge" parent="android:Theme.DeviceDefault.NoActionBar">
-        <!-- Primary brand color. -->
+        <item name="android:statusBarColor">#FFFFFF</item>
+        <item name="android:navigationBarColor">#FFFFFF</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:windowLightNavigationBar" tools:targetApi="27">true</item>
     </style>
 
     <style name="Theme.App.Starting" parent="Theme.SplashScreen">

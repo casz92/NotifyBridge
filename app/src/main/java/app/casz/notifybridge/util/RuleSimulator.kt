@@ -2,7 +2,7 @@ package app.casz.notifybridge.util
 
 import android.content.Context
 import app.casz.notifybridge.data.local.entity.RuleEntity
-import app.casz.notifybridge.ui.loadGlobalVars
+import app.casz.notifybridge.data.repository.GlobalVarsRepository
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
@@ -34,11 +34,13 @@ object RuleSimulator {
     fun resolveTemplate(template: String, context: Context): String {
         var resolved = template
         // Inyectar variables globales únicamente
-        val globalVars = loadGlobalVars(context)
+        val globalVars = GlobalVarsRepository.load(context)
         for (pair in globalVars) {
             val placeholder = "{global_${pair.first}}"
             resolved = resolved.replace(placeholder, pair.second)
         }
+        // Inyectar device_uuid
+        resolved = resolved.replace("{device_uuid}", DeviceUtil.getDeviceUuid(context))
         return resolved
     }
 
@@ -84,6 +86,16 @@ object RuleSimulator {
 
             for ((key, value) in headersMap) {
                 requestBuilder.addHeader(key, value)
+            }
+
+            // Inyectar Headers del Sistema del Dispositivo
+            try {
+                val systemHeaders = DeviceUtil.getSystemInfoHeaders(context)
+                for ((key, value) in systemHeaders) {
+                    requestBuilder.addHeader(key, value)
+                }
+            } catch (e: Exception) {
+                android.util.Log.e(tag, "Error inyectando headers del sistema: ${e.message}")
             }
 
             val request = requestBuilder.build()

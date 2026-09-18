@@ -49,19 +49,16 @@ class NotificationListener : NotificationListenerService() {
         }
 
         serviceScope.launch {
-            // 3. Obtener reglas activas de Room para apps e IMAP
+            // 3. Obtener reglas activas para apps e IMAP
             val rules = getRulesFromDatabase()
 
             for (rule in rules) {
                 if (!rule.enabled) continue
                 if (rule.source == RuleSource.APP) {
                     val packages = rule.appPackageNames?.split(",")?.map { it.trim() } ?: emptyList()
-                    if (packages.contains(packageName) || packages.contains("*")) {
-                        // 4. Verificar filtro Regex usando bloques múltiples (AND/OR)
+                    if (packages.isEmpty() || packages.contains(packageName) || packages.contains("*")) {
                         val isMatch = rule.matches(mapOf("title" to title, "text" to processedText))
-
                         if (isMatch) {
-                            // 5. Reemplazar variables en el payload body usando el texto procesado (nuevo)
                             val finalPayload = resolveVariables(
                                 template = rule.bodyTemplate,
                                 title = title,
@@ -70,24 +67,18 @@ class NotificationListener : NotificationListenerService() {
                                 systemTime = systemTime,
                                 packageName = packageName
                             )
-
-                            // 6. Crear entidad de Envío (DispatchEntity) con estado PENDING
                             val dispatchId = savePendingDispatch(rule, finalPayload, "App: $packageName")
-
-                            // 7. Encolar la tarea con WorkManager
                             enqueueWork(dispatchId)
                         }
                     }
                 } else if (rule.source == RuleSource.IMAP) {
-                    // Si interceptamos una notificación de Gmail (com.google.android.gm)
                     if (packageName == "com.google.android.gm") {
-                        Log.d("NotificationListener", "Notificación de Gmail recibida en Modo IMAP. Disparando ImapFetchWorker.")
+                        Log.d("NotificationListener", "Gmail notif recibida — disparando ImapFetchWorker.")
                         enqueueImapFetchWork(rule.id)
                     }
                 }
             }
 
-            // Registrar en el historial de procesados e historial de chats si al menos se procesó la notificación
             markNotificationProcessed(packageName, notId, title, text)
             updateChatHistory(packageName, title, text)
         }
@@ -160,23 +151,23 @@ class NotificationListener : NotificationListenerService() {
         systemTime: String,
         packageName: String
     ): String {
-        // En una app completa, aquí también se leerían y resolverían las variables globales de DataStore.
         return template
             .replace("{not_title}", title)
             .replace("{not_id}", id)
             .replace("{not_text}", text)
             .replace("{system_time}", systemTime)
             .replace("{package_name}", packageName)
+            .replace("{device_uuid}", app.casz.notifybridge.util.DeviceUtil.getDeviceUuid(applicationContext))
     }
 
     // --- Simulación de acceso a base de datos y encolamiento ---
-    private suspend fun getRulesFromDatabase(): List<RuleEntity> {
-        return app.casz.notifybridge.ui.loadRules(applicationContext)
+    private fun getRulesFromDatabase(): List<RuleEntity> {
+        return app.casz.notifybridge.data.repository.RulesRepository.load(applicationContext)
     }
 
-    private suspend fun savePendingDispatch(rule: RuleEntity, payload: String, sourceInfo: String): Long {
+    private fun savePendingDispatch(rule: RuleEntity, payload: String, sourceInfo: String): Long {
         val context = applicationContext
-        val dispatches = app.casz.notifybridge.ui.loadDispatches(context).toMutableList()
+        val dispatches = app.casz.notifybridge.data.repository.DispatchRepository.load(context).toMutableList()
         val newId = System.currentTimeMillis()
         val newDispatch = DispatchEntity(
             id = newId,
@@ -192,8 +183,8 @@ class NotificationListener : NotificationListenerService() {
             maxRetries = 3
         )
         dispatches.add(newDispatch)
-        app.casz.notifybridge.ui.saveDispatches(context, dispatches)
-        Log.d("NotificationListener", "Guardando envío pendiente real en Room: $payload")
+        app.casz.notifybridge.data.repository.DispatchRepository.save(context, dispatches)
+        Log.d("NotificationListener", "Guardando envío pendiente: $payload")
         return newId
     }
 

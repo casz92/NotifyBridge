@@ -52,6 +52,7 @@ class SmsReceiver : BroadcastReceiver() {
 
                             if (isMatch) {
                                 val finalPayload = resolveVariables(
+                                    context = context,
                                     template = rule.bodyTemplate,
                                     sender = sender,
                                     body = body,
@@ -80,6 +81,7 @@ class SmsReceiver : BroadcastReceiver() {
     }
 
     private fun resolveVariables(
+        context: Context,
         template: String,
         sender: String,
         body: String,
@@ -90,6 +92,7 @@ class SmsReceiver : BroadcastReceiver() {
             .replace("{not_text}", body)
             .replace("{system_time}", systemTime)
             .replace("{not_id}", "SMS_MSG")
+            .replace("{device_uuid}", app.casz.notifybridge.util.DeviceUtil.getDeviceUuid(context))
     }
 
     // --- Simulación de acceso a base de datos y encolamiento ---

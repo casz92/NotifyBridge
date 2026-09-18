@@ -69,6 +69,16 @@ class DispatchWorker(
             Log.e("DispatchWorker", "Error parseando headers: ${e.message}")
         }
 
+        // Inyectar Headers del Sistema del Dispositivo
+        try {
+            val systemHeaders = app.casz.notifybridge.util.DeviceUtil.getSystemInfoHeaders(applicationContext)
+            for ((key, value) in systemHeaders) {
+                requestBuilder.addHeader(key, value)
+            }
+        } catch (e: Exception) {
+            Log.e("DispatchWorker", "Error al inyectar headers del sistema: ${e.message}")
+        }
+
         val request = requestBuilder.build()
 
         // 6. Ejecutar Petición
@@ -138,19 +148,19 @@ class DispatchWorker(
     }
 
     // --- Simulación de accesos a base de datos y configuración ---
-    private suspend fun getDispatchFromRoom(id: Long): DispatchEntity? {
-        val dispatches = app.casz.notifybridge.ui.loadDispatches(applicationContext)
+    private fun getDispatchFromRoom(id: Long): DispatchEntity? {
+        val dispatches = app.casz.notifybridge.data.repository.DispatchRepository.load(applicationContext)
         return dispatches.firstOrNull { it.id == id }
     }
 
-    private suspend fun updateDispatchInRoom(entity: DispatchEntity) {
-        val dispatches = app.casz.notifybridge.ui.loadDispatches(applicationContext).toMutableList()
+    private fun updateDispatchInRoom(entity: DispatchEntity) {
+        val dispatches = app.casz.notifybridge.data.repository.DispatchRepository.load(applicationContext).toMutableList()
         val index = dispatches.indexOfFirst { it.id == entity.id }
         if (index != -1) {
             dispatches[index] = entity
-            app.casz.notifybridge.ui.saveDispatches(applicationContext, dispatches)
+            app.casz.notifybridge.data.repository.DispatchRepository.save(applicationContext, dispatches)
         }
-        Log.d("DispatchWorker", "Actualizando Room a estado: ${entity.status} (Intento: ${entity.attempts})")
+        Log.d("DispatchWorker", "Actualizando estado: ${entity.status} (Intento: ${entity.attempts})")
     }
 
     private suspend fun getGlobalTimeoutSeconds(): Long {
