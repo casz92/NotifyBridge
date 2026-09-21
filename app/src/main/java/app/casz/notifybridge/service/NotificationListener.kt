@@ -17,6 +17,7 @@ import app.casz.notifybridge.worker.DispatchWorker
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import java.util.UUID
 import java.util.regex.Pattern
 
@@ -67,8 +68,14 @@ class NotificationListener : NotificationListenerService() {
                                 systemTime = systemTime,
                                 packageName = packageName
                             )
-                            val dispatchId = savePendingDispatch(rule, finalPayload, "App: $packageName")
-                            enqueueWork(dispatchId)
+                            val parsedUrl = rule.httpUrl.trim().toHttpUrlOrNull()
+                            val isUrlValid = parsedUrl != null && parsedUrl.host.isNotBlank() && rule.httpUrl.trim() != "https://" && rule.httpUrl.trim() != "http://"
+                            if (!isUrlValid) {
+                                saveFailedDispatch(rule, finalPayload, "App: $packageName", "URL de destino no configurada o inválida ('${rule.httpUrl}')")
+                            } else {
+                                val dispatchId = savePendingDispatch(rule, finalPayload, "App: $packageName")
+                                enqueueWork(dispatchId)
+                            }
                         }
                     }
                 } else if (rule.source == RuleSource.IMAP) {
@@ -151,13 +158,23 @@ class NotificationListener : NotificationListenerService() {
         systemTime: String,
         packageName: String
     ): String {
-        return template
+        var resolved = template
             .replace("{not_title}", title)
+            .replace("{sms_sender}", title)
             .replace("{not_id}", id)
             .replace("{not_text}", text)
+            .replace("{sms_text}", text)
+            .replace("{not_type}", "notification")
+            .replace("{timestamp}", systemTime)
             .replace("{system_time}", systemTime)
             .replace("{package_name}", packageName)
             .replace("{device_uuid}", app.casz.notifybridge.util.DeviceUtil.getDeviceUuid(applicationContext))
+
+        val globalVars = app.casz.notifybridge.data.repository.GlobalVarsRepository.load(applicationContext)
+        for (pair in globalVars) {
+            resolved = resolved.replace("{global_${pair.first}}", pair.second)
+        }
+        return resolved
     }
 
     // --- Simulación de acceso a base de datos y encolamiento ---
@@ -186,6 +203,28 @@ class NotificationListener : NotificationListenerService() {
         app.casz.notifybridge.data.repository.DispatchRepository.save(context, dispatches)
         Log.d("NotificationListener", "Guardando envío pendiente: $payload")
         return newId
+    }
+
+    private fun saveFailedDispatch(rule: RuleEntity, payload: String, sourceInfo: String, errorMsg: String) {
+        val context = applicationContext
+        val dispatches = app.casz.notifybridge.data.repository.DispatchRepository.load(context).toMutableList()
+        val newDispatch = DispatchEntity(
+            id = System.currentTimeMillis(),
+            workId = null,
+            ruleId = rule.id,
+            triggeredBy = sourceInfo,
+            targetUrl = rule.httpUrl,
+            httpMethod = rule.httpMethod,
+            headersJson = rule.headersJson,
+            payloadBody = payload,
+            status = DispatchStatus.FAILED,
+            attempts = 1,
+            maxRetries = 3,
+            errorMessage = errorMsg
+        )
+        dispatches.add(newDispatch)
+        app.casz.notifybridge.data.repository.DispatchRepository.save(context, dispatches)
+        Log.w("NotificationListener", "Envío fallido por URL inválida: $errorMsg")
     }
 
     private fun enqueueWork(dispatchId: Long) {

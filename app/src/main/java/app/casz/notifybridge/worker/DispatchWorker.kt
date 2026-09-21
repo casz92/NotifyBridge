@@ -7,6 +7,7 @@ import androidx.work.WorkerParameters
 import app.casz.notifybridge.data.local.entity.DispatchEntity
 import app.casz.notifybridge.data.local.entity.DispatchStatus
 import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
@@ -52,11 +53,23 @@ class DispatchWorker(
             .readTimeout(timeoutSeconds, TimeUnit.SECONDS)
             .build()
 
+        // Validar formato de URL antes de continuar para evitar bucles con URLs incompletas como "https://"
+        val targetUrlTrimmed = dispatch.targetUrl.trim()
+        val parsedUrl = targetUrlTrimmed.toHttpUrlOrNull()
+        if (parsedUrl == null || parsedUrl.host.isBlank() || targetUrlTrimmed == "https://" || targetUrlTrimmed == "http://") {
+            val failedDispatch = dispatch.copy(
+                status = DispatchStatus.FAILED,
+                errorMessage = "URL de destino no configurada o inválida: '${dispatch.targetUrl}'. Configura una URL con dominio real."
+            )
+            updateDispatchInRoom(failedDispatch)
+            return Result.failure()
+        }
+
         // 5. Construir petición HTTP
         val mediaType = "application/json; charset=utf-8".toMediaType()
         val requestBody = dispatch.payloadBody.toRequestBody(mediaType)
         val requestBuilder = Request.Builder()
-            .url(dispatch.targetUrl)
+            .url(targetUrlTrimmed)
             .method(dispatch.httpMethod, requestBody)
 
         // Cargar Headers desde el JSON
@@ -110,9 +123,23 @@ class DispatchWorker(
                 // Otro error HTTP, reintentar con plazo ponderado (Result.retry())
                 return handleFailure(dispatch, "HTTP Error: $responseCode", responseCode, responseBodyString)
             }
+        } catch (e: IllegalArgumentException) {
+            val failedDispatch = dispatch.copy(
+                status = DispatchStatus.FAILED,
+                errorMessage = "Configuración HTTP no válida: ${e.message}"
+            )
+            updateDispatchInRoom(failedDispatch)
+            return Result.failure()
         } catch (e: IOException) {
             // Error de Red/Timeout
             return handleFailure(dispatch, "Network Failure: ${e.message}", null, null)
+        } catch (e: Exception) {
+            val failedDispatch = dispatch.copy(
+                status = DispatchStatus.FAILED,
+                errorMessage = "Error inesperado: ${e.message}"
+            )
+            updateDispatchInRoom(failedDispatch)
+            return Result.failure()
         }
     }
 

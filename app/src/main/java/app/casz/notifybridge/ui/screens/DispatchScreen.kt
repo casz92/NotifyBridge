@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -75,8 +76,55 @@ fun DispatchScreen(
             )
         }
 
-        // ── History actions bar ──────────────────────────────────────
-        if (queueTab == 1 && historyDispatches.isNotEmpty()) {
+        // ── Action bars ─────────────────────────────────────────────
+        if (queueTab == 0 && activeDispatches.isNotEmpty()) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 6.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "${activeDispatches.size} en cola",
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = AppColors.OnSurfaceVar
+                )
+                TextButton(
+                    onClick = {
+                        val workManager = androidx.work.WorkManager.getInstance(context)
+                        for (i in 0 until dispatches.size) {
+                            val item = dispatches[i]
+                            if (item.status == DispatchStatus.PENDING ||
+                                item.status == DispatchStatus.PROCESSING ||
+                                item.status == DispatchStatus.FAILED) {
+                                item.workId?.let { workIdStr ->
+                                    try {
+                                        workManager.cancelWorkById(java.util.UUID.fromString(workIdStr))
+                                    } catch (_: Exception) {}
+                                }
+                                dispatches[i] = item.copy(status = DispatchStatus.CANCELLED)
+                            }
+                        }
+                        try {
+                            workManager.cancelAllWork()
+                        } catch (_: Exception) {}
+                        onSaveDispatches()
+                    }
+                ) {
+                    Icon(
+                        Icons.Default.Close,
+                        contentDescription = null,
+                        tint = AppColors.Error,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Cancelar todos", color = AppColors.Error, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                }
+            }
+            Divider(color = AppColors.Divider)
+        } else if (queueTab == 1 && historyDispatches.isNotEmpty()) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()

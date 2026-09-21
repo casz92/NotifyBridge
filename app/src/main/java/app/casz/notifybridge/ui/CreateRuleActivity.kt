@@ -47,6 +47,7 @@ import app.casz.notifybridge.ui.theme.AppColors
 import app.casz.notifybridge.ui.theme.NotifyBridgeTheme
 import androidx.compose.runtime.snapshots.SnapshotStateList
 import org.json.JSONObject
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 
 class CreateRuleActivity : ComponentActivity() {
 
@@ -389,8 +390,10 @@ fun CreateRuleScreen(
                                 Toast.makeText(context, "El nombre es obligatorio", Toast.LENGTH_SHORT).show()
                                 return@Button
                             }
-                            if (httpUrl.isBlank()) {
-                                Toast.makeText(context, "La URL es obligatoria", Toast.LENGTH_SHORT).show()
+                            val trimmedUrl = httpUrl.trim()
+                            val parsedUrl = trimmedUrl.toHttpUrlOrNull()
+                            if (trimmedUrl.isBlank() || trimmedUrl == "https://" || trimmedUrl == "http://" || parsedUrl == null || parsedUrl.host.isBlank()) {
+                                Toast.makeText(context, "Ingresa una URL de destino válida con dominio (ej. https://midominio.com/webhook)", Toast.LENGTH_LONG).show()
                                 return@Button
                             }
                             val headersMap = mutableMapOf<String, String>()

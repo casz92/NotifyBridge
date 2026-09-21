@@ -18,6 +18,8 @@ NotifyBridge es una aplicación nativa de Android diseñada para interceptar y r
 4. **Optimización de Batería y Autoinicio**:
    - Tarjeta dedicada en Ajustes para verificar el estado de la batería e invocar la exclusión de optimización de batería (`Doze mode`).
    - Receptor `BootReceiver` para autoinicio al encender o reiniciar el dispositivo (`BOOT_COMPLETED`).
+5. **Reglas Predeterminadas y Especificación de Payloads**:
+   - Incluye reglas preconfiguradas para detección de pagos de **Nequi** y **Bancolombia** (App y SMS). Consulta [PAYLOADS.md](PAYLOADS.md) para el detalle de campos y ejemplos de transmisión.
 
 ## Stack Tecnológico
 

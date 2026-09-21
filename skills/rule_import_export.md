@@ -87,9 +87,11 @@ You can use the following placeholder variables inside `bodyTemplate` or inside 
 | `{not_text}` | APP / SMS | The notification text (for Apps) or message body (for SMS). |
 | `{sms_sender}` | SMS | Sender's originating phone number. |
 | `{sms_text}` | SMS | SMS message text content. |
+| `{not_type}` | ALL | Event type identifier string (`"notification"`, `"sms"`, or `"imap"`). |
 | `{package_name}` | APP | Package ID of the application that spawned the notification. |
-| `{timestamp}` | ALL | Timestamp of when the event occurred. |
-| `{system_time}` | ALL | System timestamp. |
+| `{device_uuid}` | ALL | Unique persistent hardware/installation UUID of the device. |
+| `{timestamp}` | ALL | Timestamp of when the event occurred in milliseconds. |
+| `{system_time}` | ALL | System timestamp in milliseconds. |
 | `{imap_from}` | IMAP | Email sender (From) address. |
 | `{imap_to}` | IMAP | Email recipient (To) address. |
 | `{imap_subject}` | IMAP | Email subject header. |

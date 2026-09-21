@@ -8,13 +8,19 @@ import android.util.Log
 import androidx.work.Data
 import androidx.work.OneTimeWorkRequest
 import androidx.work.WorkManager
+import app.casz.notifybridge.data.local.entity.DispatchEntity
+import app.casz.notifybridge.data.local.entity.DispatchStatus
 import app.casz.notifybridge.data.local.entity.RuleEntity
 import app.casz.notifybridge.data.local.entity.RuleSource
 import app.casz.notifybridge.data.local.entity.matches
+import app.casz.notifybridge.data.repository.DispatchRepository
+import app.casz.notifybridge.data.repository.GlobalVarsRepository
+import app.casz.notifybridge.data.repository.RulesRepository
 import app.casz.notifybridge.worker.DispatchWorker
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import java.util.regex.Pattern
 
 class SmsReceiver : BroadcastReceiver() {
@@ -44,7 +50,7 @@ class SmsReceiver : BroadcastReceiver() {
                 }
 
                 receiverScope.launch {
-                    val rules = getSmsRulesFromDatabase()
+                    val rules = getSmsRulesFromDatabase(context)
                     for (rule in rules) {
                         if (!rule.enabled) continue
                         if (rule.source == RuleSource.SMS) {
@@ -59,9 +65,14 @@ class SmsReceiver : BroadcastReceiver() {
                                     systemTime = timestamp
                                 )
 
-                                val dispatchId = savePendingDispatch(rule, finalPayload, "SMS from: $sender")
-
-                                enqueueWork(context, dispatchId)
+                                val parsedUrl = rule.httpUrl.trim().toHttpUrlOrNull()
+                                val isUrlValid = parsedUrl != null && parsedUrl.host.isNotBlank() && rule.httpUrl.trim() != "https://" && rule.httpUrl.trim() != "http://"
+                                if (!isUrlValid) {
+                                    saveFailedDispatch(context, rule, finalPayload, "SMS from: $sender", "URL de destino no configurada o inválida ('${rule.httpUrl}')")
+                                } else {
+                                    val dispatchId = savePendingDispatch(context, rule, finalPayload, "SMS from: $sender")
+                                    enqueueWork(context, dispatchId)
+                                }
                             }
                         }
                     }
@@ -87,34 +98,70 @@ class SmsReceiver : BroadcastReceiver() {
         body: String,
         systemTime: String
     ): String {
-        return template
+        var resolved = template
             .replace("{not_title}", sender)
+            .replace("{sms_sender}", sender)
             .replace("{not_text}", body)
-            .replace("{system_time}", systemTime)
+            .replace("{sms_text}", body)
             .replace("{not_id}", "SMS_MSG")
+            .replace("{not_type}", "sms")
+            .replace("{timestamp}", systemTime)
+            .replace("{system_time}", systemTime)
+            .replace("{package_name}", "sms")
             .replace("{device_uuid}", app.casz.notifybridge.util.DeviceUtil.getDeviceUuid(context))
+
+        val globalVars = GlobalVarsRepository.load(context)
+        for (pair in globalVars) {
+            resolved = resolved.replace("{global_${pair.first}}", pair.second)
+        }
+        return resolved
     }
 
-    // --- Simulación de acceso a base de datos y encolamiento ---
-    private suspend fun getSmsRulesFromDatabase(): List<RuleEntity> {
-        return listOf(
-            RuleEntity(
-                id = 2,
-                name = "SMS Interceptor Rule",
-                source = RuleSource.SMS,
-                appPackageNames = null,
-                regexPattern = ".*OTP.*",
-                httpUrl = "https://midominio.com/api/sms",
-                httpMethod = "POST",
-                headersJson = "{\"Content-Type\":\"application/json\"}",
-                bodyTemplate = "{\"remitente\":\"{not_title}\", \"codigo_otp\":\"{not_text}\", \"recibido\":\"{system_time}\"}"
-            )
+    private fun getSmsRulesFromDatabase(context: Context): List<RuleEntity> {
+        return RulesRepository.load(context)
+    }
+
+    private fun savePendingDispatch(context: Context, rule: RuleEntity, payload: String, sourceInfo: String): Long {
+        val dispatches = DispatchRepository.load(context).toMutableList()
+        val newId = System.currentTimeMillis()
+        val newDispatch = DispatchEntity(
+            id = newId,
+            workId = null,
+            ruleId = rule.id,
+            triggeredBy = sourceInfo,
+            targetUrl = rule.httpUrl,
+            httpMethod = rule.httpMethod,
+            headersJson = rule.headersJson,
+            payloadBody = payload,
+            status = DispatchStatus.PENDING,
+            attempts = 0,
+            maxRetries = 3
         )
+        dispatches.add(newDispatch)
+        DispatchRepository.save(context, dispatches)
+        Log.d("SmsReceiver", "Guardando SMS interceptado en Room: $payload")
+        return newId
     }
 
-    private suspend fun savePendingDispatch(rule: RuleEntity, payload: String, sourceInfo: String): Long {
-        Log.d("SmsReceiver", "Guardando SMS interceptado en Room: $payload")
-        return System.currentTimeMillis()
+    private fun saveFailedDispatch(context: Context, rule: RuleEntity, payload: String, sourceInfo: String, errorMsg: String) {
+        val dispatches = DispatchRepository.load(context).toMutableList()
+        val newDispatch = DispatchEntity(
+            id = System.currentTimeMillis(),
+            workId = null,
+            ruleId = rule.id,
+            triggeredBy = sourceInfo,
+            targetUrl = rule.httpUrl,
+            httpMethod = rule.httpMethod,
+            headersJson = rule.headersJson,
+            payloadBody = payload,
+            status = DispatchStatus.FAILED,
+            attempts = 1,
+            maxRetries = 3,
+            errorMessage = errorMsg
+        )
+        dispatches.add(newDispatch)
+        DispatchRepository.save(context, dispatches)
+        Log.w("SmsReceiver", "Envío SMS fallido por URL inválida: $errorMsg")
     }
 
     private fun enqueueWork(context: Context, dispatchId: Long) {

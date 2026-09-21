@@ -359,7 +359,20 @@ fun MainScreen() {
                         RulesRepository.save(context, rulesList)
                     },
                     onExportRules = { exportLauncher.launch("notifybridge_rules.json") },
-                    onImportRules = { importLauncher.launch("application/json") }
+                    onImportRules = { importLauncher.launch("application/json") },
+                    onAddPresetRules = { presetsToAdd ->
+                        var nextId = (rulesList.maxOfOrNull { it.id } ?: 0L) + 1L
+                        for (preset in presetsToAdd) {
+                            rulesList.add(preset.copy(id = nextId++))
+                        }
+                        RulesRepository.save(context, rulesList)
+                        val msg = if (presetsToAdd.size == 1) {
+                            "Regla \"${presetsToAdd.first().name}\" registrada"
+                        } else {
+                            "${presetsToAdd.size} reglas predeterminadas registradas"
+                        }
+                        Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+                    }
                 )
                 1 -> DispatchScreen(
                     dispatches = dispatchesList,

@@ -169,6 +169,7 @@ class ImapFetchWorker(
             .replace("{imap_body}", body)
             .replace("{imap_from}", from)
             .replace("{imap_to}", to)
+            .replace("{not_type}", "imap")
             .replace("{timestamp}", systemTime)
             .replace("{system_time}", systemTime)
             .replace("{device_uuid}", app.casz.notifybridge.util.DeviceUtil.getDeviceUuid(appContext))
